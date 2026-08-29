@@ -2,11 +2,13 @@
 #include "sha256.h"
 #include "common.h"
 #include "property.h"
+#include "ui.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <conio.h>
+#include <windows.h>
 
 static void ensure_data_dir(void) {
     MKDIR("data");
@@ -229,8 +231,9 @@ void get_password_hidden(char *buffer, int maxlen) {
 }
 
 int user_register(UserManager *um) {
-    clear_screen();
-    print_header("SIGN UP");
+    ui_init();
+    ui_clear();
+    ui_header("SIGN UP", "Create your account");
     
     User new_user = {0};
     char input[MAX_FIELD_LEN];
@@ -238,14 +241,16 @@ int user_register(UserManager *um) {
     char salt[SALT_LENGTH + 1];
     char hash[SHA256_DIGEST_LENGTH * 2 + 1];
     
+    ui_form_start("ACCOUNT DETAILS");
+    
     while (1) {
-        if (!input_property_field_string("Username (8-16 chars, alphanumeric)", input, MAX_FIELD_LEN, validate_username)) return 0;
+        if (!ui_form_field("Username", input, MAX_FIELD_LEN, validate_username, "8-16 chars, alphanumeric")) return 0;
         if (strcasecmp(input, "Admin") == 0) {
-            printf("Username 'Admin' is reserved.\n");
+            ui_toast(UI_STYLE_WARNING, "Username 'Admin' is reserved");
             continue;
         }
         if (username_exists(um, input)) {
-            printf("Username already exists.\n");
+            ui_toast(UI_STYLE_ERROR, "Username already exists");
             continue;
         }
         strncpy(new_user.username, input, MAX_FIELD_LEN - 1);
@@ -253,51 +258,51 @@ int user_register(UserManager *um) {
     }
     
     while (1) {
-        if (!input_property_field_string("First Name", input, MAX_FIELD_LEN, validate_name)) return 0;
+        if (!ui_form_field("First Name", input, MAX_FIELD_LEN, validate_name, "Letters and spaces only")) return 0;
         capitalize_words(input);
         strncpy(new_user.first_name, input, MAX_FIELD_LEN - 1);
         break;
     }
     
     while (1) {
-        if (!input_property_field_string("Last Name", input, MAX_FIELD_LEN, validate_name)) return 0;
+        if (!ui_form_field("Last Name", input, MAX_FIELD_LEN, validate_name, "Letters and spaces only")) return 0;
         capitalize_words(input);
         strncpy(new_user.last_name, input, MAX_FIELD_LEN - 1);
         break;
     }
     
     while (1) {
-        if (!input_property_field_string("ID (10 digits)", input, MAX_FIELD_LEN, validate_id)) return 0;
+        if (!ui_form_field("National ID", input, MAX_FIELD_LEN, validate_id, "10 digits")) return 0;
         strncpy(new_user.id, input, MAX_FIELD_LEN - 1);
         break;
     }
     
     while (1) {
-        if (!input_property_field_string("Phone Number (09xxxxxxxxx)", input, MAX_FIELD_LEN, validate_phone)) return 0;
+        if (!ui_form_field("Phone", input, MAX_FIELD_LEN, validate_phone, "09xxxxxxxxx")) return 0;
         strncpy(new_user.phone, input, MAX_FIELD_LEN - 1);
         break;
     }
     
     while (1) {
-        if (!input_property_field_string("Email", input, MAX_FIELD_LEN, validate_email)) return 0;
+        if (!ui_form_field("Email", input, MAX_FIELD_LEN, validate_email, "user@domain.com")) return 0;
         strncpy(new_user.email, input, MAX_FIELD_LEN - 1);
         break;
     }
     
+    ui_form_end();
+    
+    ui_form_start("SECURITY");
     while (1) {
-        printf("Password (min 8 chars, upper, lower, digit): ");
-        get_password_hidden(pass1, MAX_FIELD_LEN);
-        
+        if (!ui_form_field_password("Password", pass1, MAX_FIELD_LEN, "Min 8 chars, upper, lower, digit")) return 0;
         if (!validate_password(pass1)) {
-            printf("Password does not meet requirements.\n");
+            ui_toast(UI_STYLE_ERROR, "Password does not meet requirements");
             continue;
         }
         
-        printf("Confirm Password: ");
-        get_password_hidden(pass2, MAX_FIELD_LEN);
+        if (!ui_form_field_password("Confirm Password", pass2, MAX_FIELD_LEN, "Must match above")) return 0;
         
         if (strcmp(pass1, pass2) != 0) {
-            printf("Passwords do not match.\n");
+            ui_toast(UI_STYLE_ERROR, "Passwords do not match");
             continue;
         }
         
@@ -308,42 +313,45 @@ int user_register(UserManager *um) {
         strncpy(new_user.salt, salt, SALT_LENGTH);
         break;
     }
+    ui_form_end();
     
-    if (user_manager_add(um, &new_user)) {
-        printf("\nRegistration successful!\n");
-        pause_screen();
+    ui_spinner_start("Creating account...");
+    Sleep(500);
+    bool success = user_manager_add(um, &new_user);
+    ui_spinner_stop();
+    
+    if (success) {
+        ui_alert(UI_STYLE_SUCCESS, "Success", "Registration successful! Welcome to Property Management System.");
         return 1;
     } else {
-        printf("\nRegistration failed.\n");
-        pause_screen();
+        ui_alert(UI_STYLE_ERROR, "Error", "Registration failed. Please try again.");
         return 0;
     }
 }
 
 int user_login(UserManager *um, char *logged_in_username) {
-    clear_screen();
-    print_header("LOGIN");
+    ui_init();
+    ui_clear();
+    ui_header("LOGIN", "Sign in to your account");
     
     char username[MAX_FIELD_LEN];
     char password[MAX_FIELD_LEN];
     char captcha[50];
     int expected, answer;
     
-    if (!input_property_field_string("Username", username, MAX_FIELD_LEN, NULL)) return 0;
-    
-    printf("Password: ");
-    get_password_hidden(password, MAX_FIELD_LEN);
+    ui_form_start("CREDENTIALS");
+    if (!ui_form_field("Username", username, MAX_FIELD_LEN, NULL, "Your username")) return 0;
+    if (!ui_form_field_password("Password", password, MAX_FIELD_LEN, "Your password")) return 0;
+    ui_form_end();
     
     if (!validate_password(password)) {
-        printf("Invalid password format.\n");
-        pause_screen();
+        ui_alert(UI_STYLE_ERROR, "Error", "Invalid password format");
         return 0;
     }
     
     User *user = user_manager_find_by_username(um, username);
     if (!user) {
-        printf("User not found.\n");
-        pause_screen();
+        ui_alert(UI_STYLE_ERROR, "Error", "User not found");
         return 0;
     }
     
@@ -353,15 +361,14 @@ int user_login(UserManager *um, char *logged_in_username) {
     if (strcmp(computed_hash, user->password_hash) != 0) {
         if (strcmp(username, "Admin") == 0 && strcmp(password, "Admin1234") == 0) {
             strcpy(logged_in_username, "Admin");
-            printf("\nAdmin login successful!\n");
-            pause_screen();
+            ui_alert(UI_STYLE_SUCCESS, "Admin Login", "Welcome, Administrator!");
             return 2;
         }
-        printf("Invalid password.\n");
-        pause_screen();
+        ui_alert(UI_STYLE_ERROR, "Error", "Invalid password");
         return 0;
     }
     
+    ui_form_start("SECURITY CHECK");
     while (1) {
         int num1 = rand() % 10 + 1;
         int num2 = rand() % 10 + 1;
@@ -375,28 +382,30 @@ int user_login(UserManager *um, char *logged_in_username) {
             case '*': expected = num1 * num2; break;
         }
         
-        printf("Captcha: %s = ", captcha);
         char ans_str[20];
-        safe_gets(ans_str, sizeof(ans_str));
+        if (!ui_form_field("Captcha", ans_str, sizeof(ans_str), NULL, captcha)) continue;
         answer = atoi(ans_str);
         
         if (answer == expected) {
-            printf("Correct!\n");
+            ui_toast(UI_STYLE_SUCCESS, "Correct! Verification passed.");
             break;
         } else {
-            printf("Incorrect. Try again.\n");
+            ui_toast(UI_STYLE_ERROR, "Incorrect. Please try again.");
         }
     }
+    ui_form_end();
     
     strcpy(logged_in_username, username);
-    printf("\nLogin successful! Welcome, %s %s\n", user->first_name, user->last_name);
-    pause_screen();
+    ui_alert(UI_STYLE_SUCCESS, "Welcome", "Login successful!");
+    ui_print_styled(UI_STYLE_INFO, "  Hello, %s %s\n", user->first_name, user->last_name);
+    Sleep(1000);
     return 1;
 }
 
 int user_change_password(UserManager *um, const char *username) {
-    clear_screen();
-    print_header("CHANGE PASSWORD");
+    ui_init();
+    ui_clear();
+    ui_header("CHANGE PASSWORD", "Update your password");
     
     char old_pass[MAX_FIELD_LEN];
     char new_pass1[MAX_FIELD_LEN];
@@ -407,53 +416,53 @@ int user_change_password(UserManager *um, const char *username) {
     User *user = user_manager_find_by_username(um, username);
     if (!user) return 0;
     
-    printf("Current Password: ");
-    get_password_hidden(old_pass, MAX_FIELD_LEN);
+    ui_form_start("VERIFICATION");
+    if (!ui_form_field_password("Current Password", old_pass, MAX_FIELD_LEN, "Enter current password")) return 0;
+    ui_form_end();
     
     char computed_hash[SHA256_DIGEST_LENGTH * 2 + 1];
     hash_password(old_pass, user->salt, computed_hash);
     
     if (strcmp(computed_hash, user->password_hash) != 0) {
-        printf("Current password is incorrect.\n");
-        pause_screen();
+        ui_alert(UI_STYLE_ERROR, "Error", "Current password is incorrect");
         return 0;
     }
     
+    ui_form_start("NEW PASSWORD");
     while (1) {
-        printf("New Password: ");
-        get_password_hidden(new_pass1, MAX_FIELD_LEN);
-        
+        if (!ui_form_field_password("New Password", new_pass1, MAX_FIELD_LEN, "Min 8 chars, upper, lower, digit")) return 0;
         if (!validate_password(new_pass1)) {
-            printf("Password does not meet requirements.\n");
+            ui_toast(UI_STYLE_ERROR, "Password does not meet requirements");
             continue;
         }
         
-        printf("Confirm New Password: ");
-        get_password_hidden(new_pass2, MAX_FIELD_LEN);
+        if (!ui_form_field_password("Confirm New Password", new_pass2, MAX_FIELD_LEN, "Must match above")) return 0;
         
         if (strcmp(new_pass1, new_pass2) != 0) {
-            printf("Passwords do not match.\n");
+            ui_toast(UI_STYLE_ERROR, "Passwords do not match");
             continue;
         }
         
         generate_salt(salt, SALT_LENGTH);
         hash_password(new_pass1, salt, hash);
         
-        if (user_manager_update_password(um, username, hash, salt)) {
-            printf("\nPassword changed successfully!\n");
-            pause_screen();
+        ui_spinner_start("Updating password...");
+        Sleep(500);
+        bool success = user_manager_update_password(um, username, hash, salt);
+        ui_spinner_stop();
+        
+        if (success) {
+            ui_alert(UI_STYLE_SUCCESS, "Success", "Password changed successfully!");
             return 1;
         } else {
-            printf("\nFailed to update password.\n");
-            pause_screen();
+            ui_alert(UI_STYLE_ERROR, "Error", "Failed to update password");
             return 0;
         }
     }
 }
 
 int user_edit_profile(UserManager *um, const char *username) {
-    clear_screen();
-    print_header("EDIT PROFILE");
+    ui_init();
     
     User *user = user_manager_find_by_username(um, username);
     if (!user) return 0;
@@ -462,21 +471,28 @@ int user_edit_profile(UserManager *um, const char *username) {
     int choice;
     
     while (1) {
-        clear_screen();
-        print_header("EDIT PROFILE");
-        printf("1. First Name: %s\n", user->first_name);
-        printf("2. Last Name: %s\n", user->last_name);
-        printf("3. ID: %s\n", user->id);
-        printf("4. Phone: %s\n", user->phone);
-        printf("5. Email: %s\n", user->email);
-        printf("6. Change Password\n");
-        printf("0. Back\n");
+        ui_clear();
+        ui_header("EDIT PROFILE", "Manage your account information");
+        ui_status_bar(username, "SETTINGS", "");
         
-        if (!input_property_field_int("Select field to edit", 0, 6, &choice)) continue;
+        ui_print_styled(UI_STYLE_PRIMARY, "  Current Information:\n");
+        ui_print_styled(UI_STYLE_DEFAULT, "  1. First Name: %s\n", user->first_name);
+        ui_print_styled(UI_STYLE_DEFAULT, "  2. Last Name:  %s\n", user->last_name);
+        ui_print_styled(UI_STYLE_DEFAULT, "  3. ID:         %s\n", user->id);
+        ui_print_styled(UI_STYLE_DEFAULT, "  4. Phone:      %s\n", user->phone);
+        ui_print_styled(UI_STYLE_DEFAULT, "  5. Email:      %s\n", user->email);
+        printf("\n");
+        
+        ui_print_styled(UI_STYLE_INFO, "  6. Change Password\n");
+        ui_print_styled(UI_STYLE_MUTED, "  0. Back\n");
+        printf("\n");
+        
+        if (!ui_form_field_int("Select option", &choice, 0, 6, "0-6")) continue;
         
         if (choice == 0) break;
         if (choice == 6) {
             user_change_password(um, username);
+            user = user_manager_find_by_username(um, username); // Refresh
             continue;
         }
         
@@ -484,15 +500,19 @@ int user_edit_profile(UserManager *um, const char *username) {
         int (*validators[])(const char *) = {NULL, validate_name, validate_name, validate_id, validate_phone, validate_email};
         void (*formatters[])(char *) = {NULL, capitalize_words, capitalize_words, NULL, NULL, NULL};
         
-        if (!input_property_field_string(prompts[choice], input, MAX_FIELD_LEN, validators[choice])) continue;
+        if (!ui_form_field(prompts[choice], input, MAX_FIELD_LEN, validators[choice], "Enter new value")) continue;
         if (formatters[choice]) formatters[choice](input);
         
+        ui_spinner_start("Saving...");
+        Sleep(300);
         if (user_manager_update_field(um, username, choice, input)) {
-            printf("Updated successfully!\n");
+            ui_spinner_stop();
+            ui_alert(UI_STYLE_SUCCESS, "Success", "Profile updated successfully!");
+            user = user_manager_find_by_username(um, username); // Refresh
         } else {
-            printf("Update failed!\n");
+            ui_spinner_stop();
+            ui_alert(UI_STYLE_ERROR, "Error", "Update failed!");
         }
-        pause_screen();
     }
     return 1;
 }

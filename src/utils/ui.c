@@ -16,7 +16,7 @@ static HANDLE spinner_thread = NULL;
 static volatile bool spinner_running = false;
 static char spinner_label[100] = {0};
 
-static const char *spinner_frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+static const char *spinner_frames[] = {"|", "/", "-", "\\", "|", "/", "-", "\\"};
 
 static DWORD WINAPI spinner_loop(LPVOID param) {
     while (spinner_running) {
@@ -112,15 +112,15 @@ void ui_print_styled(UIStyle style, const char *fmt, ...) {
 
 void ui_box_top(int width) {
     ui_set_style(UI_STYLE_MUTED);
-    printf("┌");
-    for (int i = 0; i < width - 2; i++) printf("─");
-    printf("┐\n");
+    printf("+");
+    for (int i = 0; i < width - 2; i++) printf("-");
+    printf("+\n");
     ui_reset_color();
 }
 
 void ui_box_middle(int width, const char *title) {
     ui_set_style(UI_STYLE_MUTED);
-    printf("│");
+    printf("|");
     ui_reset_color();
     
     int title_len = strlen(title);
@@ -133,21 +133,21 @@ void ui_box_middle(int width, const char *title) {
     
     for (int i = 0; i < width - 2 - padding - title_len; i++) printf(" ");
     ui_set_style(UI_STYLE_MUTED);
-    printf("│\n");
+    printf("|\n");
     ui_reset_color();
 }
 
 void ui_box_bottom(int width) {
     ui_set_style(UI_STYLE_MUTED);
-    printf("└");
-    for (int i = 0; i < width - 2; i++) printf("─");
-    printf("┘\n");
+    printf("+");
+    for (int i = 0; i < width - 2; i++) printf("-");
+    printf("+\n");
     ui_reset_color();
 }
 
 void ui_box_line(int width, const char *left, const char *content, const char *right) {
     ui_set_style(UI_STYLE_MUTED);
-    printf("│ ");
+    printf("| ");
     ui_reset_color();
     
     if (left) {
@@ -172,7 +172,7 @@ void ui_box_line(int width, const char *left, const char *content, const char *r
     }
     
     ui_set_style(UI_STYLE_MUTED);
-    printf(" │\n");
+    printf(" |\n");
     ui_reset_color();
 }
 
@@ -217,7 +217,7 @@ void ui_footer(const char *left, const char *right) {
 
 void ui_divider(void) {
     ui_set_style(UI_STYLE_MUTED);
-    for (int i = 0; i < UI_WIDTH; i++) printf("─");
+    for (int i = 0; i < UI_WIDTH; i++) printf("-");
     printf("\n");
     ui_reset_color();
 }
@@ -229,7 +229,7 @@ void ui_spacer(int count) {
 void ui_menu_item(int num, const char *label, const char *desc, bool selected) {
     if (selected) {
         ui_set_style(UI_STYLE_PRIMARY);
-        printf("  ▸ %2d. %-25s", num, label);
+        printf("  > %2d. %-25s", num, label);
         if (desc) {
             ui_set_style(UI_STYLE_MUTED);
             printf("  %s", desc);
@@ -435,7 +435,7 @@ void ui_progress_start(const char *label, int total) {
     ui_set_style(UI_STYLE_INFO);
     printf("  %s\n", label);
     printf("  ");
-    for (int i = 0; i < 50; i++) printf("░");
+    for (int i = 0; i < 50; i++) printf(".");
     printf(" 0%%");
     fflush(stdout);
     ui_reset_color();
@@ -447,8 +447,8 @@ void ui_progress_update(int current) {
     
     ui_set_style(UI_STYLE_PRIMARY);
     printf("\r  ");
-    for (int i = 0; i < percent / 2; i++) printf("█");
-    for (int i = percent / 2; i < 50; i++) printf("░");
+    for (int i = 0; i < percent / 2; i++) printf("#");
+    for (int i = percent / 2; i < 50; i++) printf(".");
     printf(" %3d%%", percent);
     fflush(stdout);
     ui_reset_color();
@@ -457,7 +457,7 @@ void ui_progress_update(int current) {
 void ui_progress_end(void) {
     ui_set_style(UI_STYLE_SUCCESS);
     printf("\r  ");
-    for (int i = 0; i < 50; i++) printf("█");
+    for (int i = 0; i < 50; i++) printf("#");
     printf(" 100%%\n");
     ui_reset_color();
 }
@@ -484,17 +484,15 @@ void ui_spinner_stop(void) {
 void ui_alert(UIStyle style, const char *title, const char *message) {
     printf("\n");
     ui_set_style(style);
-    printf("  ┌─ %s ", title);
-    for (int i = 0; i < UI_WIDTH - 8 - strlen(title); i++) printf("─");
-    printf("┐\n");
+    printf("  +-- %s ", title);
+    for (int i = 0; i < UI_WIDTH - 8 - strlen(title); i++) printf("-");
+    printf("+\n");
     
-    printf("  │ %s\n", message);
-    for (int i = strlen(message); i < UI_WIDTH - 6; i++) printf(" ");
-    printf("│\n");
+    printf("  | %s\n", message);
     
-    printf("  └");
-    for (int i = 0; i < UI_WIDTH - 4; i++) printf("─");
-    printf("┘\n");
+    printf("  +");
+    for (int i = 0; i < UI_WIDTH - 4; i++) printf("-");
+    printf("+\n");
     ui_reset_color();
     printf("\n");
 }
@@ -512,16 +510,16 @@ void ui_confirm(const char *message, bool *out) {
 
 void ui_toast(UIStyle style, const char *message) {
     ui_set_style(style);
-    printf("  ▸ %s\n", message);
+    printf("  > %s\n", message);
     ui_reset_color();
 }
 
 void ui_status_bar(const char *user, const char *mode, const char *time) {
     ui_set_style(UI_STYLE_MUTED);
     printf("\n");
-    for (int i = 0; i < UI_WIDTH; i++) printf("─");
+    for (int i = 0; i < UI_WIDTH; i++) printf("-");
     printf("\n  User: %s  |  Mode: %s  |  %s\n", user, mode, time);
-    for (int i = 0; i < UI_WIDTH; i++) printf("─");
+    for (int i = 0; i < UI_WIDTH; i++) printf("-");
     printf("\n");
     ui_reset_color();
 }
