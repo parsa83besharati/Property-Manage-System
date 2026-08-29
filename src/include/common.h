@@ -149,5 +149,8 @@ void get_current_time(char *buffer, int size);
 void clear_screen(void);
 void pause_screen(void);
 void print_header(const char *title);
+void get_password_hidden(char *buffer, int maxlen);
+
+#include "ui.h"
 
 #endif
