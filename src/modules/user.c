@@ -77,13 +77,21 @@ static int user_deserialize(User *user, FILE *fp) {
     
     int idx = 0;
     strncpy(user->username, tokens[idx++], MAX_FIELD_LEN - 1);
+    user->username[MAX_FIELD_LEN - 1] = '\0';
     strncpy(user->first_name, tokens[idx++], MAX_FIELD_LEN - 1);
+    user->first_name[MAX_FIELD_LEN - 1] = '\0';
     strncpy(user->last_name, tokens[idx++], MAX_FIELD_LEN - 1);
+    user->last_name[MAX_FIELD_LEN - 1] = '\0';
     strncpy(user->id, tokens[idx++], MAX_FIELD_LEN - 1);
+    user->id[MAX_FIELD_LEN - 1] = '\0';
     strncpy(user->phone, tokens[idx++], MAX_FIELD_LEN - 1);
+    user->phone[MAX_FIELD_LEN - 1] = '\0';
     strncpy(user->email, tokens[idx++], MAX_FIELD_LEN - 1);
+    user->email[MAX_FIELD_LEN - 1] = '\0';
     strncpy(user->password_hash, tokens[idx++], SHA256_DIGEST_LENGTH * 2);
+    user->password_hash[SHA256_DIGEST_LENGTH * 2] = '\0';
     strncpy(user->salt, tokens[idx++], SALT_LENGTH);
+    user->salt[SALT_LENGTH] = '\0';
     
     return 1;
 }
