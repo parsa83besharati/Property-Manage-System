@@ -1,0 +1,34 @@
+# Build artifacts
+*.exe
+*.o
+*.obj
+*.out
+property_manage.exe
+
+# Build directories
+obj/
+bin/
+build/
+dist/
+
+# Data files (generated at runtime)
+data/
+*.dat
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
