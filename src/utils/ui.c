@@ -284,16 +284,17 @@ int ui_form_field(const char *label, char *buffer, int maxlen, int (*validator)(
         safe_gets(buffer, maxlen);
         
         if (strlen(buffer) == 0) {
-            ui_print_styled(UI_STYLE_WARNING, "  ⚠ This field is required\n");
+            ui_print_styled(UI_STYLE_WARNING, "  ! This field is required\n");
             continue;
         }
         
         if (validator && !validator(buffer)) {
-            ui_print_styled(UI_STYLE_ERROR, "  ✗ Invalid input format\n");
+            ui_print_styled(UI_STYLE_ERROR, "  ! Invalid input format\n");
             continue;
         }
         
-        ui_print_styled(UI_STYLE_SUCCESS, "  ✓ Valid\n");
+        ui_print_styled(UI_STYLE_SUCCESS, "  + Valid\n");
+        Sleep(300);
         return 1;
     }
 }
@@ -309,14 +310,15 @@ int ui_form_field_int(const char *label, int *out, int min, int max, const char 
         char *endptr;
         long val = strtol(buffer, &endptr, 10);
         if (endptr == buffer || *endptr != '\0') {
-            ui_print_styled(UI_STYLE_ERROR, "  ✗ Please enter a valid number\n");
+            ui_print_styled(UI_STYLE_ERROR, "  ! Please enter a valid number\n");
             continue;
         }
         if (val < min || val > max) {
-            ui_print_styled(UI_STYLE_ERROR, "  ✗ Value must be between %d and %d\n", min, max);
+            ui_print_styled(UI_STYLE_ERROR, "  ! Value must be between %d and %d\n", min, max);
             continue;
         }
         *out = (int)val;
+        Sleep(300);
         return 1;
     }
 }
@@ -332,14 +334,15 @@ int ui_form_field_double(const char *label, double *out, double min, double max,
         char *endptr;
         double val = strtod(buffer, &endptr);
         if (endptr == buffer || *endptr != '\0') {
-            ui_print_styled(UI_STYLE_ERROR, "  ✗ Please enter a valid number\n");
+            ui_print_styled(UI_STYLE_ERROR, "  ! Please enter a valid number\n");
             continue;
         }
         if (val < min || val > max) {
-            ui_print_styled(UI_STYLE_ERROR, "  ✗ Value must be between %.2f and %.2f\n", min, max);
+            ui_print_styled(UI_STYLE_ERROR, "  ! Value must be between %.2f and %.2f\n", min, max);
             continue;
         }
         *out = val;
+        Sleep(300);
         return 1;
     }
 }
@@ -366,10 +369,11 @@ int ui_form_field_enum(const char *label, const char *options[], int count, int 
         
         if (choice >= 1 && choice <= count) {
             *out = choice - 1;
-            ui_print_styled(UI_STYLE_SUCCESS, "  ✓ Selected: %s\n", options[choice - 1]);
+            ui_print_styled(UI_STYLE_SUCCESS, "  + Selected: %s\n", options[choice - 1]);
+            Sleep(300);
             return 1;
         }
-        ui_print_styled(UI_STYLE_ERROR, "  ✗ Invalid choice. Enter 1-%d\n", count);
+        ui_print_styled(UI_STYLE_ERROR, "  ! Invalid choice. Enter 1-%d\n", count);
     }
 }
 
@@ -387,11 +391,12 @@ int ui_form_field_password(const char *label, char *buffer, int maxlen, const ch
         get_password_hidden(buffer, maxlen);
         
         if (strlen(buffer) == 0) {
-            ui_print_styled(UI_STYLE_WARNING, "  ⚠ This field is required\n");
+            ui_print_styled(UI_STYLE_WARNING, "  ! This field is required\n");
             continue;
         }
         
-        ui_print_styled(UI_STYLE_SUCCESS, "  ✓ Entered\n");
+        ui_print_styled(UI_STYLE_SUCCESS, "  + Entered\n");
+        Sleep(300);
         return 1;
     }
 }
@@ -412,7 +417,7 @@ void ui_table_start(const char *headers[], int col_count, int widths[]) {
     
     printf("  ");
     for (int i = 0; i < col_count; i++) {
-        for (int j = 0; j < widths[i]; j++) printf("─");
+        for (int j = 0; j < widths[i]; j++) printf("-");
         printf(" ");
     }
     printf("\n");
@@ -485,7 +490,7 @@ void ui_alert(UIStyle style, const char *title, const char *message) {
     printf("\n");
     ui_set_style(style);
     printf("  +-- %s ", title);
-    for (int i = 0; i < UI_WIDTH - 8 - strlen(title); i++) printf("-");
+    for (int i = 0; i < UI_WIDTH - 8 - (int)strlen(title); i++) printf("-");
     printf("+\n");
     
     printf("  | %s\n", message);
@@ -495,6 +500,7 @@ void ui_alert(UIStyle style, const char *title, const char *message) {
     printf("+\n");
     ui_reset_color();
     printf("\n");
+    ui_pause(NULL);
 }
 
 void ui_confirm(const char *message, bool *out) {
@@ -512,6 +518,16 @@ void ui_toast(UIStyle style, const char *message) {
     ui_set_style(style);
     printf("  > %s\n", message);
     ui_reset_color();
+    Sleep(1000);
+}
+
+void ui_pause(const char *message) {
+    ui_set_style(UI_STYLE_MUTED);
+    if (message) printf("\n  %s", message);
+    else printf("\n  Press any key to continue...");
+    ui_reset_color();
+    _getch();
+    printf("\n");
 }
 
 void ui_status_bar(const char *user, const char *mode, const char *time) {

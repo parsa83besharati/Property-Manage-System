@@ -110,6 +110,7 @@ void ui_spinner_stop(void);
 void ui_alert(UIStyle style, const char *title, const char *message);
 void ui_confirm(const char *message, bool *out);
 void ui_toast(UIStyle style, const char *message);
+void ui_pause(const char *message);
 
 void ui_status_bar(const char *user, const char *mode, const char *time);
 
