@@ -3,11 +3,15 @@
 #include "property.h"
 #include "menu.h"
 #include "database.h"
+#include "config.h"
 
 int main(void) {
     srand((unsigned int)time(NULL));
     
-    Database *db = database_open("data/property_manage.db");
+    Config config;
+    config_load("config.ini", &config);
+    
+    Database *db = database_open(config.db_path);
     if (!db) {
         fprintf(stderr, "Failed to open database\n");
         return 1;
@@ -19,7 +23,7 @@ int main(void) {
         return 1;
     }
     
-    database_migrate_from_files(db, USERS_FILE, PROPERTIES_FILE);
+    database_migrate_from_files(db, config.users_file, config.properties_file);
     
     menu_entry(db);
     

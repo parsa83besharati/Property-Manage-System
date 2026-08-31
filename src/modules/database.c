@@ -1,5 +1,6 @@
 #include "database.h"
 #include "sha256.h"
+#include "audit.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,6 +94,7 @@ int database_init_schema(Database *db) {
         sqlite3_free(err_msg);
         return 0;
     }
+    if (!audit_log_init_schema(db)) return 0;
     return 1;
 }
 

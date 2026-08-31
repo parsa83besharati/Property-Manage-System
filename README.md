@@ -1,6 +1,6 @@
 # Property Management System
 
-A console-based property management application written in C, featuring user authentication, property listings (sell/rent), SQLite database backend, modern terminal UI, and comprehensive test suite.
+A console-based property management application written in C, featuring user authentication, property listings (sell/rent), SQLite database backend, modern terminal UI, comprehensive test suite, configuration management, CSV export, audit logging, and Docker support.
 
 ## Features
 
@@ -13,7 +13,11 @@ A console-based property management application written in C, featuring user aut
 - **Profile Management**: Edit personal info, change password
 - **Modern Terminal UI**: Color-coded styles, box drawing, forms with validation, spinners, progress bars, tables
 - **SQLite Database**: WAL mode, foreign keys, migrations from flat files
-- **Comprehensive Test Suite**: 73+ unit tests following SDET best practices
+- **Configuration Management**: INI-style config file for paths, limits, UI settings
+- **CSV Export**: Export users and properties to CSV with proper escaping
+- **Audit Logging**: Track all CRUD operations, login/logout, exports with filtering and pagination
+- **Docker Support**: Multi-stage Dockerfile for containerized deployment
+- **Comprehensive Test Suite**: 83+ unit tests following SDET best practices
 
 ## Quick Start
 
@@ -21,6 +25,7 @@ A console-based property management application written in C, featuring user aut
 
 - GCC compiler (MinGW on Windows, or GCC/Clang on Linux/macOS)
 - Make (optional, for Makefile)
+- Docker (optional, for containerized deployment)
 
 ### Building
 
@@ -31,6 +36,7 @@ make
 # Or manually with GCC
 gcc -Wall -Wextra -std=c11 -Isrc/include -o property_manage.exe \
     src/main.c src/utils/common.c src/utils/sha256.c src/utils/ui.c src/utils/sqlite3.c \
+    src/utils/config.c src/utils/export.c src/utils/audit.c \
     src/modules/user.c src/modules/property.c src/modules/menu.c src/modules/database.c
 ```
 
@@ -42,41 +48,39 @@ gcc -Wall -Wextra -std=c11 -Isrc/include -o property_manage.exe \
 
 On Windows, you can also double-click the executable.
 
+### Docker Deployment
+
+```bash
+# Build image
+docker build -t property-manage .
+
+# Run container
+docker run -it --rm \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/config.ini:/app/config.ini \
+  property-manage
+```
+
 ## Running Tests
 
-### All Tests (73+ tests)
+### All Tests (83+ tests)
 ```bash
 # From project root
-make -C tests test
+make test
 
-# Or from tests directory
-cd tests && make test
-```
+# Or run individual test suites
+make test-sha256       # 3 tests
+make test-user         # 9 tests
+make test-property     # 12 tests
+make test-database     # 6 tests
+make test-validation   # 28 tests
+make test-edge-cases   # 15 tests
+make test-export       # 4 tests
+make test-audit        # 6 tests
+make test-config       # 2 tests
 
-### Individual Module Tests
-```bash
-# SHA256 tests (3 tests)
-make -C tests test-sha256
-
-# User DB tests (9 tests)
-make -C tests test-user
-
-# Property DB tests (12 tests)
-make -C tests test-property
-
-# Database Core tests (6 tests)
-make -C tests test-database
-
-# Validation tests (28 tests)
-make -C tests test-validation
-
-# Edge case tests (15 tests)
-make -C tests test-edge-cases
-```
-
-### Clean Test Artifacts
-```bash
-make -C tests clean
+# Clean test artifacts
+make clean
 ```
 
 ## Usage
@@ -100,6 +104,27 @@ Login with username `Admin` and password `Admin1234` to access:
 - Delete any property
 - System statistics
 
+### Configuration
+Edit `config.ini` to customize:
+- Database path
+- UI page size and colors
+- System limits (max properties, users, string lengths)
+- File paths for legacy data migration
+
+### CSV Export
+Export data from the application or programmatically:
+```c
+export_users_to_csv(db, "users.csv");
+export_properties_to_csv(db, "properties.csv");
+export_all_to_csv(db, "users.csv", "properties.csv");
+```
+
+### Audit Logging
+All operations are automatically logged. Query logs with:
+```c
+audit_get_logs(db, "username", AUDIT_CREATE, AUDIT_ENTITY_PROPERTY, "PROP001", 10, 0, &logs, &count);
+```
+
 ## Project Structure
 
 ```
@@ -113,24 +138,33 @@ Property-Manage-System/
 │   │   ├── property.h         # Property management API
 │   │   ├── menu.h             # Menu system API
 │   │   ├── database.h         # SQLite database API
-│   │   └── ui.h               # Terminal UI components
+│   │   ├── ui.h               # Terminal UI components
+│   │   ├── config.h           # Configuration API
+│   │   ├── export.h           # CSV export API
+│   │   └── audit.h            # Audit logging API
 │   ├── utils/                 # Utility implementations
 │   │   ├── common.c           # Input validation, string utils, date/time
 │   │   ├── sha256.c           # SHA-256 implementation
 │   │   ├── ui.c               # Terminal UI (colors, boxes, forms, tables)
-│   │   └── sqlite3.c          # SQLite amalgamation
+│   │   ├── sqlite3.c          # SQLite amalgamation
+│   │   ├── config.c           # INI config parser
+│   │   ├── export.c           # CSV export
+│   │   └── audit.c            # Audit logging
 │   └── modules/               # Core business logic
 │       ├── user.c             # Registration, login, profile management
 │       ├── property.c         # Property input/validation
 │       ├── menu.c             # Menu navigation, search, admin
-│       └── database.c         # SQLite CRUD, migrations
-├── tests/                      # Unit test suite
+│       └── database.c         # SQLite CRUD, migrations, audit init
+├── tests/                      # Unit test suite (83+ tests)
 │   ├── run_sha256.c           # SHA256 hash tests (3)
 │   ├── run_user.c             # User DB tests (9)
 │   ├── run_property.c         # Property DB tests (12)
 │   ├── run_database.c         # Database core tests (6)
 │   ├── run_validation.c       # Input validation tests (28)
 │   ├── run_edge_cases.c       # Edge case tests (15)
+│   ├── run_export.c           # CSV export tests (4)
+│   ├── run_audit.c            # Audit logging tests (6)
+│   ├── run_config.c           # Config tests (2)
 │   ├── run_negative.c         # Negative/error tests (WIP)
 │   ├── unity.c/.h             # Unity test framework
 │   └── Makefile               # Test build targets
@@ -140,11 +174,13 @@ Property-Manage-System/
 ├── data/                       # Runtime data (created automatically)
 │   ├── property_manage.db     # SQLite database
 │   └── *.dat                  # Legacy flat files (migrated)
+├── config.ini                  # Configuration file
+├── Dockerfile                  # Multi-stage Docker build
 ├── Makefile                    # Build configuration
 └── README.md                   # This file
 ```
 
-## Test Suite Overview (73+ Tests)
+## Test Suite Overview (83 Tests)
 
 | Suite | Tests | Status |
 |-------|-------|--------|
@@ -154,7 +190,10 @@ Property-Manage-System/
 | Database Core | 6 | ✅ PASS |
 | Input Validation | 28 | ✅ PASS |
 | Edge Cases | 15 | ✅ PASS |
-| Negative/Error | Partial | ⚠️ Exposing bugs |
+| CSV Export | 4 | ✅ PASS |
+| Audit Logging | 6 | ✅ PASS |
+| Configuration | 2 | ✅ PASS |
+| **Total** | **83** | **✅ All PASS** |
 
 ### Bugs Found by Tests:
 1. **INSERT SQL mismatch** - 29 columns vs 30 placeholders (fixed)
@@ -163,6 +202,8 @@ Property-Manage-System/
 4. **Validate overflow** - `validate_int_range` didn't check `errno` (fixed)
 5. **Pagination logic** - Test expectations wrong for limit 0 (fixed)
 6. **DB cleanup** - WAL/SHM files persisted between tests (fixed)
+7. **Config parser** - Leading spaces in values (fixed)
+8. **Audit filters** - Enum signedness issue with -1 sentinel (fixed)
 
 ## Documentation
 
@@ -174,6 +215,7 @@ Property-Manage-System/
 ### SQLite Database (`data/property_manage.db`)
 - **users** table: username (PK), first_name, last_name, id, phone, email, password_hash, salt, created_at
 - **properties** table: code (PK), district, address, location, ptype, action, subtype, ... active, created_at
+- **audit_log** table: id (PK), timestamp, username, action, entity, entity_id, details
 - Foreign key: properties.username → users.username
 
 ### Legacy Flat Files (migrated)
@@ -187,6 +229,7 @@ Property-Manage-System/
 - No plaintext passwords ever stored
 - Foreign key constraints enforce data integrity
 - WAL mode for better concurrency
+- CSV export properly escapes special characters
 
 ## Architecture Highlights
 
@@ -198,7 +241,7 @@ Single `Property` struct with enums for type/action:
 - Optional fields set to 0/NULL when not applicable
 
 ### Modular Design
-- Clear separation: User, Property, Menu, Database, UI
+- Clear separation: User, Property, Menu, Database, UI, Config, Export, Audit
 - Header/implementation separation
 - SQLite abstraction layer
 
@@ -226,7 +269,7 @@ Single `Property` struct with enums for type/action:
 2. Include test in `tests/Makefile`
 3. Follow AAA pattern (Arrange, Act, Assert)
 4. Use `open_test_db()` / `cleanup_db()` for isolation
-5. Update `docs/TEST_DOCUMENTATION.md`
+4. Update `docs/TEST_DOCUMENTATION.md`
 
 ## License
 
@@ -246,3 +289,8 @@ Install MinGW-w64 on Windows, or use WSL with `sudo apt install build-essential`
 - Delete `data/` folder to reset to clean state
 - Check console output for error messages
 - Ensure write permissions in application directory
+
+### Docker issues
+- Ensure Docker daemon is running
+- Check volume mounts: `docker run -v $(pwd)/data:/app/data ...`
+- Config file must exist: `docker run -v $(pwd)/config.ini:/app/config.ini ...`
