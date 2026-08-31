@@ -2,33 +2,28 @@
 #include "user.h"
 #include "property.h"
 #include "menu.h"
+#include "database.h"
 
 int main(void) {
     srand((unsigned int)time(NULL));
     
-    UserManager *um = user_manager_create(USERS_FILE, SALTS_FILE);
-    if (!um) {
-        fprintf(stderr, "Failed to create user manager\n");
+    Database *db = database_open("data/property_manage.db");
+    if (!db) {
+        fprintf(stderr, "Failed to open database\n");
         return 1;
     }
     
-    PropertyManager *pm = property_manager_create(PROPERTIES_FILE);
-    if (!pm) {
-        fprintf(stderr, "Failed to create property manager\n");
-        user_manager_destroy(um);
+    if (!database_init_schema(db)) {
+        fprintf(stderr, "Failed to initialize database schema\n");
+        database_close(db);
         return 1;
     }
     
-    user_manager_load(um);
-    property_manager_load(pm);
+    database_migrate_from_files(db, USERS_FILE, PROPERTIES_FILE);
     
-    menu_entry(um, pm);
+    menu_entry(db);
     
-    property_manager_save(pm);
-    user_manager_save(um);
-    
-    property_manager_destroy(pm);
-    user_manager_destroy(um);
+    database_close(db);
     
     return 0;
 }

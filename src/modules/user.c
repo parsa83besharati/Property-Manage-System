@@ -10,235 +10,7 @@
 #include <conio.h>
 #include <windows.h>
 
-static void ensure_data_dir(void) {
-    MKDIR("data");
-}
-
-static int ensure_capacity(UserManager *um) {
-    if (um->count >= um->capacity) {
-        int new_capacity = um->capacity == 0 ? 100 : um->capacity * 2;
-        User *new_users = realloc(um->users, new_capacity * sizeof(User));
-        if (!new_users) return 0;
-        um->users = new_users;
-        um->capacity = new_capacity;
-    }
-    return 1;
-}
-
-UserManager *user_manager_create(const char *users_file, const char *salts_file) {
-    ensure_data_dir();
-    
-    UserManager *um = malloc(sizeof(UserManager));
-    if (!um) return NULL;
-    um->users = NULL;
-    um->count = 0;
-    um->capacity = 0;
-    strncpy(um->users_file, users_file, sizeof(um->users_file) - 1);
-    strncpy(um->salts_file, salts_file, sizeof(um->salts_file) - 1);
-    um->users_file[sizeof(um->users_file) - 1] = '\0';
-    um->salts_file[sizeof(um->salts_file) - 1] = '\0';
-    return um;
-}
-
-void user_manager_destroy(UserManager *um) {
-    if (um) {
-        free(um->users);
-        free(um);
-    }
-}
-
-static void user_serialize(const User *user, FILE *fp) {
-    fprintf(fp, "%s|%s|%s|%s|%s|%s|%s|%s\n",
-        user->username,
-        user->first_name,
-        user->last_name,
-        user->id,
-        user->phone,
-        user->email,
-        user->password_hash,
-        user->salt
-    );
-}
-
-static int user_deserialize(User *user, FILE *fp) {
-    char line[2048];
-    if (!fgets(line, sizeof(line), fp)) return 0;
-    trim_newline(line);
-    
-    char *tokens[8];
-    int token_count = 0;
-    char *token = strtok(line, "|");
-    while (token && token_count < 8) {
-        tokens[token_count++] = token;
-        token = strtok(NULL, "|");
-    }
-    
-    if (token_count < 8) return 0;
-    
-    int idx = 0;
-    strncpy(user->username, tokens[idx++], MAX_FIELD_LEN - 1);
-    user->username[MAX_FIELD_LEN - 1] = '\0';
-    strncpy(user->first_name, tokens[idx++], MAX_FIELD_LEN - 1);
-    user->first_name[MAX_FIELD_LEN - 1] = '\0';
-    strncpy(user->last_name, tokens[idx++], MAX_FIELD_LEN - 1);
-    user->last_name[MAX_FIELD_LEN - 1] = '\0';
-    strncpy(user->id, tokens[idx++], MAX_FIELD_LEN - 1);
-    user->id[MAX_FIELD_LEN - 1] = '\0';
-    strncpy(user->phone, tokens[idx++], MAX_FIELD_LEN - 1);
-    user->phone[MAX_FIELD_LEN - 1] = '\0';
-    strncpy(user->email, tokens[idx++], MAX_FIELD_LEN - 1);
-    user->email[MAX_FIELD_LEN - 1] = '\0';
-    strncpy(user->password_hash, tokens[idx++], SHA256_DIGEST_LENGTH * 2);
-    user->password_hash[SHA256_DIGEST_LENGTH * 2] = '\0';
-    strncpy(user->salt, tokens[idx++], SALT_LENGTH);
-    user->salt[SALT_LENGTH] = '\0';
-    
-    return 1;
-}
-
-int user_manager_load(UserManager *um) {
-    FILE *fp = fopen(um->users_file, "r");
-    if (!fp) return 0;
-    
-    User user;
-    while (user_deserialize(&user, fp)) {
-        if (!ensure_capacity(um)) {
-            fclose(fp);
-            return 0;
-        }
-        um->users[um->count++] = user;
-    }
-    
-    fclose(fp);
-    return 1;
-}
-
-int user_manager_save(UserManager *um) {
-    FILE *fp = fopen(um->users_file, "w");
-    if (!fp) return 0;
-    
-    for (int i = 0; i < um->count; i++) {
-        user_serialize(&um->users[i], fp);
-    }
-    
-    fclose(fp);
-    return 1;
-}
-
-int user_manager_add(UserManager *um, const User *user) {
-    if (!ensure_capacity(um)) return 0;
-    
-    if (user_manager_find_by_username(um, user->username)) return 0;
-    
-    um->users[um->count++] = *user;
-    return user_manager_save(um);
-}
-
-User *user_manager_find_by_username(UserManager *um, const char *username) {
-    for (int i = 0; i < um->count; i++) {
-        if (strcmp(um->users[i].username, username) == 0) {
-            return &um->users[i];
-        }
-    }
-    return NULL;
-}
-
-int user_manager_update_password(UserManager *um, const char *username, const char *new_hash, const char *new_salt) {
-    for (int i = 0; i < um->count; i++) {
-        if (strcmp(um->users[i].username, username) == 0) {
-            strncpy(um->users[i].password_hash, new_hash, SHA256_DIGEST_LENGTH * 2);
-            strncpy(um->users[i].salt, new_salt, SALT_LENGTH);
-            return user_manager_save(um);
-        }
-    }
-    return 0;
-}
-
-int user_manager_update_field(UserManager *um, const char *username, int field, const char *value) {
-    for (int i = 0; i < um->count; i++) {
-        if (strcmp(um->users[i].username, username) == 0) {
-            switch (field) {
-                case USER_FIELD_FIRST_NAME:
-                    strncpy(um->users[i].first_name, value, MAX_FIELD_LEN - 1);
-                    break;
-                case USER_FIELD_LAST_NAME:
-                    strncpy(um->users[i].last_name, value, MAX_FIELD_LEN - 1);
-                    break;
-                case USER_FIELD_ID:
-                    strncpy(um->users[i].id, value, MAX_FIELD_LEN - 1);
-                    break;
-                case USER_FIELD_PHONE:
-                    strncpy(um->users[i].phone, value, MAX_FIELD_LEN - 1);
-                    break;
-                case USER_FIELD_EMAIL:
-                    strncpy(um->users[i].email, value, MAX_FIELD_LEN - 1);
-                    break;
-                default:
-                    return 0;
-            }
-            return user_manager_save(um);
-        }
-    }
-    return 0;
-}
-
-void user_manager_list_all(UserManager *um) {
-    for (int i = 0; i < um->count; i++) {
-        printf("%s | %s %s | %s | %s\n", 
-            um->users[i].username,
-            um->users[i].first_name,
-            um->users[i].last_name,
-            um->users[i].phone,
-            um->users[i].email
-        );
-    }
-}
-
-int validate_username(const char *username) {
-    size_t len = strlen(username);
-    if (len < 8 || len > 16) return 0;
-    for (size_t i = 0; i < len; i++) {
-        if (username[i] == ' ') return 0;
-        if (!isalnum((unsigned char)username[i])) return 0;
-    }
-    return 1;
-}
-
-int validate_name(const char *name) {
-    size_t len = strlen(name);
-    if (len < 1 || len > 49) return 0;
-    for (size_t i = 0; i < len; i++) {
-        if (!isalpha((unsigned char)name[i]) && name[i] != ' ') return 0;
-    }
-    return 1;
-}
-
-int username_exists(UserManager *um, const char *username) {
-    return user_manager_find_by_username(um, username) != NULL;
-}
-
-void get_password_hidden(char *buffer, int maxlen) {
-    int i = 0;
-    int ch;
-    while (1) {
-        ch = _getch();
-        if (ch == '\r' || ch == '\n') {
-            break;
-        } else if (ch == '\b' || ch == 127) {
-            if (i > 0) {
-                i--;
-                printf("\b \b");
-            }
-        } else if (i < maxlen - 1 && ch >= 32 && ch <= 126) {
-            buffer[i++] = ch;
-            printf("*");
-        }
-    }
-    buffer[i] = '\0';
-    printf("\n");
-}
-
-int user_register(UserManager *um) {
+int user_register(Database *db) {
     ui_init();
     ui_clear();
     ui_header("SIGN UP", "Create your account");
@@ -257,7 +29,7 @@ int user_register(UserManager *um) {
             ui_toast(UI_STYLE_WARNING, "Username 'Admin' is reserved");
             continue;
         }
-        if (username_exists(um, input)) {
+        if (username_exists(db, input)) {
             ui_toast(UI_STYLE_ERROR, "Username already exists");
             continue;
         }
@@ -325,7 +97,7 @@ int user_register(UserManager *um) {
     
     ui_spinner_start("Creating account...");
     Sleep(500);
-    bool success = user_manager_add(um, &new_user);
+    bool success = db_user_create(db, &new_user);
     ui_spinner_stop();
     
     if (success) {
@@ -337,7 +109,7 @@ int user_register(UserManager *um) {
     }
 }
 
-int user_login(UserManager *um, char *logged_in_username) {
+int user_login(Database *db, char *logged_in_username) {
     ui_init();
     ui_clear();
     ui_header("LOGIN", "Sign in to your account");
@@ -357,7 +129,7 @@ int user_login(UserManager *um, char *logged_in_username) {
         return 0;
     }
     
-    User *user = user_manager_find_by_username(um, username);
+    User *user = db_user_find_by_username(db, username);
     if (!user) {
         ui_alert(UI_STYLE_ERROR, "Error", "User not found");
         return 0;
@@ -370,9 +142,11 @@ int user_login(UserManager *um, char *logged_in_username) {
         if (strcmp(username, "Admin") == 0 && strcmp(password, "Admin1234") == 0) {
             strcpy(logged_in_username, "Admin");
             ui_alert(UI_STYLE_SUCCESS, "Admin Login", "Welcome, Administrator!");
+            free(user);
             return 2;
         }
         ui_alert(UI_STYLE_ERROR, "Error", "Invalid password");
+        free(user);
         return 0;
     }
     
@@ -407,10 +181,11 @@ int user_login(UserManager *um, char *logged_in_username) {
     ui_alert(UI_STYLE_SUCCESS, "Welcome", "Login successful!");
     ui_print_styled(UI_STYLE_INFO, "  Hello, %s %s\n", user->first_name, user->last_name);
     Sleep(1000);
+    free(user);
     return 1;
 }
 
-int user_change_password(UserManager *um, const char *username) {
+int user_change_password(Database *db, const char *username) {
     ui_init();
     ui_clear();
     ui_header("CHANGE PASSWORD", "Update your password");
@@ -421,11 +196,14 @@ int user_change_password(UserManager *um, const char *username) {
     char salt[SALT_LENGTH + 1];
     char hash[SHA256_DIGEST_LENGTH * 2 + 1];
     
-    User *user = user_manager_find_by_username(um, username);
+    User *user = db_user_find_by_username(db, username);
     if (!user) return 0;
     
     ui_form_start("VERIFICATION");
-    if (!ui_form_field_password("Current Password", old_pass, MAX_FIELD_LEN, "Enter current password")) return 0;
+    if (!ui_form_field_password("Current Password", old_pass, MAX_FIELD_LEN, "Enter current password")) {
+        free(user);
+        return 0;
+    }
     ui_form_end();
     
     char computed_hash[SHA256_DIGEST_LENGTH * 2 + 1];
@@ -433,18 +211,25 @@ int user_change_password(UserManager *um, const char *username) {
     
     if (strcmp(computed_hash, user->password_hash) != 0) {
         ui_alert(UI_STYLE_ERROR, "Error", "Current password is incorrect");
+        free(user);
         return 0;
     }
     
     ui_form_start("NEW PASSWORD");
     while (1) {
-        if (!ui_form_field_password("New Password", new_pass1, MAX_FIELD_LEN, "Min 8 chars, upper, lower, digit")) return 0;
+        if (!ui_form_field_password("New Password", new_pass1, MAX_FIELD_LEN, "Min 8 chars, upper, lower, digit")) {
+            free(user);
+            return 0;
+        }
         if (!validate_password(new_pass1)) {
             ui_toast(UI_STYLE_ERROR, "Password does not meet requirements");
             continue;
         }
         
-        if (!ui_form_field_password("Confirm New Password", new_pass2, MAX_FIELD_LEN, "Must match above")) return 0;
+        if (!ui_form_field_password("Confirm New Password", new_pass2, MAX_FIELD_LEN, "Must match above")) {
+            free(user);
+            return 0;
+        }
         
         if (strcmp(new_pass1, new_pass2) != 0) {
             ui_toast(UI_STYLE_ERROR, "Passwords do not match");
@@ -456,9 +241,10 @@ int user_change_password(UserManager *um, const char *username) {
         
         ui_spinner_start("Updating password...");
         Sleep(500);
-        bool success = user_manager_update_password(um, username, hash, salt);
+        bool success = db_user_update_password(db, username, hash, salt);
         ui_spinner_stop();
         
+        free(user);
         if (success) {
             ui_alert(UI_STYLE_SUCCESS, "Success", "Password changed successfully!");
             return 1;
@@ -469,10 +255,10 @@ int user_change_password(UserManager *um, const char *username) {
     }
 }
 
-int user_edit_profile(UserManager *um, const char *username) {
+int user_edit_profile(Database *db, const char *username) {
     ui_init();
     
-    User *user = user_manager_find_by_username(um, username);
+    User *user = db_user_find_by_username(db, username);
     if (!user) return 0;
     
     char input[MAX_FIELD_LEN];
@@ -499,8 +285,9 @@ int user_edit_profile(UserManager *um, const char *username) {
         
         if (choice == 0) break;
         if (choice == 6) {
-            user_change_password(um, username);
-            user = user_manager_find_by_username(um, username); // Refresh
+            user_change_password(db, username);
+            free(user);
+            user = db_user_find_by_username(db, username);
             continue;
         }
         
@@ -513,14 +300,65 @@ int user_edit_profile(UserManager *um, const char *username) {
         
         ui_spinner_start("Saving...");
         Sleep(300);
-        if (user_manager_update_field(um, username, choice, input)) {
+        if (db_user_update_field(db, username, choice, input)) {
             ui_spinner_stop();
             ui_alert(UI_STYLE_SUCCESS, "Success", "Profile updated successfully!");
-            user = user_manager_find_by_username(um, username); // Refresh
+            free(user);
+            user = db_user_find_by_username(db, username);
         } else {
             ui_spinner_stop();
             ui_alert(UI_STYLE_ERROR, "Error", "Update failed!");
         }
     }
+    free(user);
     return 1;
+}
+
+int validate_username(const char *username) {
+    size_t len = strlen(username);
+    if (len < 8 || len > 16) return 0;
+    for (size_t i = 0; i < len; i++) {
+        if (username[i] == ' ') return 0;
+        if (!isalnum((unsigned char)username[i])) return 0;
+    }
+    return 1;
+}
+
+int validate_name(const char *name) {
+    size_t len = strlen(name);
+    if (len < 1 || len > 49) return 0;
+    for (size_t i = 0; i < len; i++) {
+        if (!isalpha((unsigned char)name[i]) && name[i] != ' ') return 0;
+    }
+    return 1;
+}
+
+int username_exists(Database *db, const char *username) {
+    User *user = db_user_find_by_username(db, username);
+    if (user) {
+        free(user);
+        return 1;
+    }
+    return 0;
+}
+
+void get_password_hidden(char *buffer, int maxlen) {
+    int i = 0;
+    int ch;
+    while (1) {
+        ch = _getch();
+        if (ch == '\r' || ch == '\n') {
+            break;
+        } else if (ch == '\b' || ch == 127) {
+            if (i > 0) {
+                i--;
+                printf("\b \b");
+            }
+        } else if (i < maxlen - 1 && ch >= 32 && ch <= 126) {
+            buffer[i++] = ch;
+            printf("*");
+        }
+    }
+    buffer[i] = '\0';
+    printf("\n");
 }

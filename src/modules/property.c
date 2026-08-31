@@ -1,341 +1,11 @@
 #include "property.h"
 #include "sha256.h"
 #include "common.h"
+#include "database.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-
-static void ensure_data_dir(void) {
-    MKDIR("data");
-}
-
-static int ensure_capacity(PropertyManager *pm) {
-    if (pm->count >= pm->capacity) {
-        int new_capacity = pm->capacity == 0 ? 100 : pm->capacity * 2;
-        Property *new_props = realloc(pm->properties, new_capacity * sizeof(Property));
-        if (!new_props) return 0;
-        pm->properties = new_props;
-        pm->capacity = new_capacity;
-    }
-    return 1;
-}
-
-PropertyManager *property_manager_create(const char *filename) {
-    ensure_data_dir();
-    
-    PropertyManager *pm = malloc(sizeof(PropertyManager));
-    if (!pm) return NULL;
-    pm->properties = NULL;
-    pm->count = 0;
-    pm->capacity = 0;
-    strncpy(pm->filename, filename, sizeof(pm->filename) - 1);
-    pm->filename[sizeof(pm->filename) - 1] = '\0';
-    return pm;
-}
-
-void property_manager_destroy(PropertyManager *pm) {
-    if (pm) {
-        free(pm->properties);
-        free(pm);
-    }
-}
-
-static void property_serialize(const Property *prop, FILE *fp) {
-    fprintf(fp, "%s|%d|%s|%d|%d|%d|%d|%d|%.2f|%d|%.2f|%s|%d|%d|%.2f|%d|%d|%.2f|%d|%.2f|%d|%d|%d|%.2f|%.2f|%.2f|%s|%s|%d\n",
-        prop->code,
-        prop->district,
-        prop->address,
-        prop->location,
-        prop->ptype,
-        prop->action,
-        prop->subtype.res_type,
-        prop->build_age,
-        prop->floor_area,
-        prop->floor,
-        prop->land_area,
-        prop->owner_phone,
-        prop->bedrooms,
-        prop->rooms,
-        prop->tax_rate,
-        prop->elevator,
-        prop->basement,
-        prop->basement_area,
-        prop->balcony,
-        prop->balcony_area,
-        prop->parkings,
-        prop->phones,
-        prop->temperature,
-        prop->sell_price,
-        prop->base_price,
-        prop->monthly_price,
-        prop->date,
-        prop->username,
-        prop->active
-    );
-}
-
-static int property_deserialize(Property *prop, FILE *fp) {
-    char line[4096];
-    if (!fgets(line, sizeof(line), fp)) return 0;
-    trim_newline(line);
-    
-    char *tokens[30];
-    int token_count = 0;
-    char *token = strtok(line, "|");
-    while (token && token_count < 30) {
-        tokens[token_count++] = token;
-        token = strtok(NULL, "|");
-    }
-    
-    if (token_count < 29) return 0;
-    
-    int idx = 0;
-    strncpy(prop->code, tokens[idx++], MAX_FIELD_LEN - 1);
-    prop->district = atoi(tokens[idx++]);
-    strncpy(prop->address, tokens[idx++], MAX_STRING_LEN - 1);
-    prop->location = (Location)atoi(tokens[idx++]);
-    prop->ptype = (PropertyType)atoi(tokens[idx++]);
-    prop->action = (PropertyAction)atoi(tokens[idx++]);
-    prop->subtype.res_type = (ResidentialType)atoi(tokens[idx++]);
-    prop->build_age = atoi(tokens[idx++]);
-    prop->floor_area = atof(tokens[idx++]);
-    prop->floor = atoi(tokens[idx++]);
-    prop->land_area = atof(tokens[idx++]);
-    strncpy(prop->owner_phone, tokens[idx++], MAX_FIELD_LEN - 1);
-    prop->bedrooms = atoi(tokens[idx++]);
-    prop->rooms = atoi(tokens[idx++]);
-    prop->tax_rate = atof(tokens[idx++]);
-    prop->elevator = (YesNo)atoi(tokens[idx++]);
-    prop->basement = (YesNo)atoi(tokens[idx++]);
-    prop->basement_area = atof(tokens[idx++]);
-    prop->balcony = (YesNo)atoi(tokens[idx++]);
-    prop->balcony_area = atof(tokens[idx++]);
-    prop->parkings = atoi(tokens[idx++]);
-    prop->phones = atoi(tokens[idx++]);
-    prop->temperature = (Temperature)atoi(tokens[idx++]);
-    prop->sell_price = atof(tokens[idx++]);
-    prop->base_price = atof(tokens[idx++]);
-    prop->monthly_price = atof(tokens[idx++]);
-    strncpy(prop->date, tokens[idx++], MAX_FIELD_LEN - 1);
-    strncpy(prop->username, tokens[idx++], MAX_FIELD_LEN - 1);
-    prop->active = atoi(tokens[idx++]);
-    
-    return 1;
-}
-
-int property_manager_load(PropertyManager *pm) {
-    FILE *fp = fopen(pm->filename, "r");
-    if (!fp) return 0;
-    
-    Property prop;
-    while (property_deserialize(&prop, fp)) {
-        if (!ensure_capacity(pm)) {
-            fclose(fp);
-            return 0;
-        }
-        pm->properties[pm->count++] = prop;
-    }
-    
-    fclose(fp);
-    return 1;
-}
-
-int property_manager_save(PropertyManager *pm) {
-    FILE *fp = fopen(pm->filename, "w");
-    if (!fp) return 0;
-    
-    for (int i = 0; i < pm->count; i++) {
-        property_serialize(&pm->properties[i], fp);
-    }
-    
-    fclose(fp);
-    return 1;
-}
-
-int property_manager_add(PropertyManager *pm, const Property *prop) {
-    if (!ensure_capacity(pm)) return 0;
-    
-    if (property_manager_find(pm, prop->code)) return 0;
-    
-    pm->properties[pm->count++] = *prop;
-    return property_manager_save(pm);
-}
-
-int property_manager_delete(PropertyManager *pm, const char *code) {
-    for (int i = 0; i < pm->count; i++) {
-        if (strcmp(pm->properties[i].code, code) == 0) {
-            pm->properties[i].active = false;
-            return property_manager_save(pm);
-        }
-    }
-    return 0;
-}
-
-Property *property_manager_find(PropertyManager *pm, const char *code) {
-    for (int i = 0; i < pm->count; i++) {
-        if (strcmp(pm->properties[i].code, code) == 0 && pm->properties[i].active) {
-            return &pm->properties[i];
-        }
-    }
-    return NULL;
-}
-
-void property_manager_list_all(PropertyManager *pm) {
-    int found = 0;
-    for (int i = 0; i < pm->count; i++) {
-        if (pm->properties[i].active) {
-            property_print_short(&pm->properties[i]);
-            found = 1;
-        }
-    }
-    if (!found) {
-        printf("No properties found.\n");
-    }
-}
-
-void property_manager_list_by_type(PropertyManager *pm, PropertyType ptype, PropertyAction action) {
-    int found = 0;
-    for (int i = 0; i < pm->count; i++) {
-        if (pm->properties[i].active && 
-            pm->properties[i].ptype == ptype && 
-            pm->properties[i].action == action) {
-            property_print_short(&pm->properties[i]);
-            found = 1;
-        }
-    }
-    if (!found) {
-        printf("No properties found for this type.\n");
-    }
-}
-
-void property_manager_list_by_district(PropertyManager *pm, int district) {
-    int found = 0;
-    for (int i = 0; i < pm->count; i++) {
-        if (pm->properties[i].active && pm->properties[i].district == district) {
-            property_print_short(&pm->properties[i]);
-            found = 1;
-        }
-    }
-    if (!found) {
-        printf("No properties found in district %d.\n", district);
-    }
-}
-
-void property_manager_list_by_location(PropertyManager *pm, Location location) {
-    int found = 0;
-    for (int i = 0; i < pm->count; i++) {
-        if (pm->properties[i].active && pm->properties[i].location == location) {
-            property_print_short(&pm->properties[i]);
-            found = 1;
-        }
-    }
-    if (!found) {
-        printf("No properties found in this location.\n");
-    }
-}
-
-void property_manager_list_by_price_range(PropertyManager *pm, double min, double max) {
-    int found = 0;
-    for (int i = 0; i < pm->count; i++) {
-        if (!pm->properties[i].active) continue;
-        
-        double price = (pm->properties[i].action == PROP_ACTION_SELL) ? 
-            pm->properties[i].sell_price : pm->properties[i].monthly_price;
-        
-        if (price >= min && price <= max) {
-            property_print_short(&pm->properties[i]);
-            found = 1;
-        }
-    }
-    if (!found) {
-        printf("No properties found in price range %.2f - %.2f.\n", min, max);
-    }
-}
-
-int property_count_by_type(PropertyManager *pm, PropertyType ptype, PropertyAction action) {
-    int count = 0;
-    for (int i = 0; i < pm->count; i++) {
-        if (pm->properties[i].active && 
-            pm->properties[i].ptype == ptype && 
-            pm->properties[i].action == action) {
-            count++;
-        }
-    }
-    return count;
-}
-
-void property_print(const Property *prop) {
-    printf("\n--- Property Details ---\n");
-    printf("Code: %s\n", prop->code);
-    printf("Type: %s %s\n", property_action_to_string(prop->action), property_type_to_string(prop->ptype));
-    
-    switch (prop->ptype) {
-        case PROP_TYPE_RESIDENTIAL:
-            printf("Subtype: %s\n", residential_type_to_string(prop->subtype.res_type));
-            break;
-        case PROP_TYPE_COMMERCIAL:
-            printf("Subtype: %s\n", commercial_type_to_string(prop->subtype.com_type));
-            break;
-        case PROP_TYPE_LAND:
-            printf("Subtype: %s\n", land_type_to_string(prop->subtype.land_type));
-            break;
-    }
-    
-    printf("District: %d\n", prop->district);
-    printf("Address: %s\n", prop->address);
-    printf("Location: %s\n", location_to_string(prop->location));
-    printf("Build Age: %d years\n", prop->build_age);
-    printf("Floor Area: %.2f m²\n", prop->floor_area);
-    printf("Floor: %d\n", prop->floor);
-    printf("Land Area: %.2f m²\n", prop->land_area);
-    printf("Owner Phone: %s\n", prop->owner_phone);
-    
-    if (prop->ptype == PROP_TYPE_RESIDENTIAL) {
-        printf("Bedrooms: %d\n", prop->bedrooms);
-    } else if (prop->ptype == PROP_TYPE_COMMERCIAL) {
-        printf("Rooms: %d\n", prop->rooms);
-    }
-    
-    printf("Tax Rate: %.2f%%\n", prop->tax_rate);
-    printf("Elevator: %s\n", yes_no_to_string(prop->elevator));
-    printf("Basement: %s\n", yes_no_to_string(prop->basement));
-    if (prop->basement == YES_NO_YES) {
-        printf("Basement Area: %.2f m²\n", prop->basement_area);
-    }
-    printf("Balcony: %s\n", yes_no_to_string(prop->balcony));
-    if (prop->balcony == YES_NO_YES) {
-        printf("Balcony Area: %.2f m²\n", prop->balcony_area);
-    }
-    printf("Parkings: %d\n", prop->parkings);
-    printf("Phones: %d\n", prop->phones);
-    printf("Temperature: %s\n", temperature_to_string(prop->temperature));
-    
-    if (prop->action == PROP_ACTION_SELL) {
-        printf("Sell Price: %.2f Rials\n", prop->sell_price);
-    } else {
-        printf("Base Price: %.2f Rials\n", prop->base_price);
-        printf("Monthly Price: %.2f Rials\n", prop->monthly_price);
-    }
-    
-    printf("Date: %s\n", prop->date);
-    printf("Registered by: %s\n", prop->username);
-    printf("Status: %s\n", prop->active ? "Active" : "Inactive");
-    printf("------------------------\n");
-}
-
-void property_print_short(const Property *prop) {
-    double price = (prop->action == PROP_ACTION_SELL) ? prop->sell_price : prop->monthly_price;
-    printf("[%s] %s %s | District: %d | %s | %.2f Rials | %s\n",
-        prop->code,
-        property_action_to_string(prop->action),
-        property_type_to_string(prop->ptype),
-        prop->district,
-        location_to_string(prop->location),
-        price,
-        prop->active ? "Active" : "Inactive"
-    );
-}
 
 int input_property_field_int(const char *prompt, int min, int max, int *out) {
     char input[100];
@@ -488,11 +158,11 @@ int input_property(Property *prop, const char *username) {
     
     if (prop->ptype != PROP_TYPE_LAND) {
         if (!input_property_field_int("Build Age (years)", 0, 200, &prop->build_age)) return 0;
-        if (!input_property_field_double("Floor Area (m²)", 0, 100000, &prop->floor_area)) return 0;
+        if (!input_property_field_double("Floor Area (m2)", 0, 100000, &prop->floor_area)) return 0;
         if (!input_property_field_int("Floor", 1, 50, &prop->floor)) return 0;
     }
     
-    if (!input_property_field_double("Land Area (m²)", 0, 100000, &prop->land_area)) return 0;
+    if (!input_property_field_double("Land Area (m2)", 0, 100000, &prop->land_area)) return 0;
     
     if (!input_property_field_string("Owner Phone Number", prop->owner_phone, MAX_FIELD_LEN, validate_phone)) return 0;
     
@@ -512,13 +182,13 @@ int input_property(Property *prop, const char *username) {
         prop->elevator = input_yes_no("Elevator");
         prop->basement = input_yes_no("Basement");
         if (prop->basement == YES_NO_YES) {
-            if (!input_property_field_double("Basement Area (m²)", 0, 10000, &prop->basement_area)) return 0;
+            if (!input_property_field_double("Basement Area (m2)", 0, 10000, &prop->basement_area)) return 0;
         } else {
             prop->basement_area = 0;
         }
         prop->balcony = input_yes_no("Balcony");
         if (prop->balcony == YES_NO_YES) {
-            if (!input_property_field_double("Balcony Area (m²)", 0, 1000, &prop->balcony_area)) return 0;
+            if (!input_property_field_double("Balcony Area (m2)", 0, 1000, &prop->balcony_area)) return 0;
         } else {
             prop->balcony_area = 0;
         }
@@ -591,4 +261,76 @@ const char *property_type_to_string(PropertyType type) {
 const char *property_action_to_string(PropertyAction action) {
     static const char *names[] = {"Sell", "Rent"};
     return (action >= 0 && action < 2) ? names[action] : "Unknown";
+}
+
+void property_print(const Property *prop) {
+    printf("\n--- Property Details ---\n");
+    printf("Code: %s\n", prop->code);
+    printf("Type: %s %s\n", property_action_to_string(prop->action), property_type_to_string(prop->ptype));
+    
+    switch (prop->ptype) {
+        case PROP_TYPE_RESIDENTIAL:
+            printf("Subtype: %s\n", residential_type_to_string(prop->subtype.res_type));
+            break;
+        case PROP_TYPE_COMMERCIAL:
+            printf("Subtype: %s\n", commercial_type_to_string(prop->subtype.com_type));
+            break;
+        case PROP_TYPE_LAND:
+            printf("Subtype: %s\n", land_type_to_string(prop->subtype.land_type));
+            break;
+    }
+    
+    printf("District: %d\n", prop->district);
+    printf("Address: %s\n", prop->address);
+    printf("Location: %s\n", location_to_string(prop->location));
+    printf("Build Age: %d years\n", prop->build_age);
+    printf("Floor Area: %.2f m2\n", prop->floor_area);
+    printf("Floor: %d\n", prop->floor);
+    printf("Land Area: %.2f m2\n", prop->land_area);
+    printf("Owner Phone: %s\n", prop->owner_phone);
+    
+    if (prop->ptype == PROP_TYPE_RESIDENTIAL) {
+        printf("Bedrooms: %d\n", prop->bedrooms);
+    } else if (prop->ptype == PROP_TYPE_COMMERCIAL) {
+        printf("Rooms: %d\n", prop->rooms);
+    }
+    
+    printf("Tax Rate: %.2f%%\n", prop->tax_rate);
+    printf("Elevator: %s\n", yes_no_to_string(prop->elevator));
+    printf("Basement: %s\n", yes_no_to_string(prop->basement));
+    if (prop->basement == YES_NO_YES) {
+        printf("Basement Area: %.2f m2\n", prop->basement_area);
+    }
+    printf("Balcony: %s\n", yes_no_to_string(prop->balcony));
+    if (prop->balcony == YES_NO_YES) {
+        printf("Balcony Area: %.2f m2\n", prop->balcony_area);
+    }
+    printf("Parkings: %d\n", prop->parkings);
+    printf("Phones: %d\n", prop->phones);
+    printf("Temperature: %s\n", temperature_to_string(prop->temperature));
+    
+    if (prop->action == PROP_ACTION_SELL) {
+        printf("Sell Price: %.2f Rials\n", prop->sell_price);
+    } else {
+        printf("Base Price: %.2f Rials\n", prop->base_price);
+        printf("Monthly Price: %.2f Rials\n", prop->monthly_price);
+    }
+    
+    printf("Date: %s\n", prop->date);
+    printf("Registered by: %s\n", prop->username);
+    printf("Status: %s\n", prop->active ? "Active" : "Inactive");
+    printf("------------------------\n");
+}
+
+void property_print_short(const Property *prop) {
+    double price = (prop->action == PROP_ACTION_SELL) ? prop->sell_price : prop->monthly_price;
+    printf("[%s] %s %s | District: %d | %s | %.2f Rials | %s\n",
+        prop->code,
+        property_action_to_string(prop->action),
+        property_type_to_string(prop->ptype),
+        prop->district,
+        location_to_string(prop->location),
+        price,
+        prop->active ? "Active" : "Inactive"
+    );
 }

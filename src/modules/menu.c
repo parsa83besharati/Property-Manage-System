@@ -1,5 +1,8 @@
 #include "menu.h"
 #include "ui.h"
+#include "database.h"
+#include "user.h"
+#include "property.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,7 +10,9 @@
 #include <windows.h>
 #include <conio.h>
 
-void menu_entry(UserManager *um, PropertyManager *pm) {
+#define PAGE_SIZE 10
+
+void menu_entry(Database *db) {
     ui_init();
     
     char logged_in_username[MAX_FIELD_LEN];
@@ -28,16 +33,16 @@ void menu_entry(UserManager *um, PropertyManager *pm) {
         
         switch (choice) {
             case 1: {
-                int result = user_login(um, logged_in_username);
+                int result = user_login(db, logged_in_username);
                 if (result == 1) {
-                    menu_main(um, pm, logged_in_username);
+                    menu_main(db, logged_in_username);
                 } else if (result == 2) {
-                    menu_admin(um, pm);
+                    menu_admin(db);
                 }
                 break;
             }
             case 2:
-                user_register(um);
+                user_register(db);
                 break;
             case 3:
                 ui_alert(UI_STYLE_INFO, "Goodbye", "Thank you for using Property Management System!");
@@ -49,11 +54,11 @@ void menu_entry(UserManager *um, PropertyManager *pm) {
     }
 }
 
-void menu_main(UserManager *um, PropertyManager *pm, const char *username) {
+void menu_main(Database *db, const char *username) {
     const char *main_options[] = {
         "Add new property listing",
         "Remove your property listing",
-        "View reports and analytics",
+        "Search and view properties",
         "Manage your profile",
         "Sign out"
     };
@@ -70,7 +75,7 @@ void menu_main(UserManager *um, PropertyManager *pm, const char *username) {
             ui_menu_item(i + 1, 
                 i == 0 ? "Add Property" : 
                 i == 1 ? "Delete Property" :
-                i == 2 ? "Reports" :
+                i == 2 ? "Search Properties" :
                 i == 3 ? "Settings" : "Logout",
                 main_options[i], false);
         }
@@ -78,17 +83,17 @@ void menu_main(UserManager *um, PropertyManager *pm, const char *username) {
         int choice = ui_menu_end("Select option", 1, 5);
         
         switch (choice) {
-            case 1: menu_add_property(um, pm, username); break;
-            case 2: menu_delete_property(pm, username); break;
-            case 3: menu_reports(pm); break;
-            case 4: menu_user_settings(um, username); break;
+            case 1: menu_add_property(db, username); break;
+            case 2: menu_delete_property(db, username); break;
+            case 3: menu_search_properties(db, username); break;
+            case 4: menu_user_settings(db, username); break;
             case 5: return;
             default: ui_toast(UI_STYLE_ERROR, "Invalid option"); Sleep(1000);
         }
     }
 }
 
-void menu_add_property(UserManager *um, PropertyManager *pm, const char *username) {
+void menu_add_property(Database *db, const char *username) {
     ui_clear();
     ui_header("ADD PROPERTY", "Create a new property listing");
     
@@ -96,7 +101,7 @@ void menu_add_property(UserManager *um, PropertyManager *pm, const char *usernam
     if (input_property(&prop, username)) {
         ui_spinner_start("Saving property...");
         Sleep(500);
-        bool success = property_manager_add(pm, &prop);
+        bool success = db_property_create(db, &prop);
         ui_spinner_stop();
         
         if (success) {
@@ -119,7 +124,7 @@ void menu_add_property(UserManager *um, PropertyManager *pm, const char *usernam
     _getch();
 }
 
-void menu_delete_property(PropertyManager *pm, const char *username) {
+void menu_delete_property(Database *db, const char *username) {
     ui_clear();
     ui_header("DELETE PROPERTY", "Remove a property listing");
     
@@ -130,7 +135,7 @@ void menu_delete_property(PropertyManager *pm, const char *username) {
     }
     ui_form_end();
     
-    Property *prop = property_manager_find(pm, code);
+    Property *prop = db_property_find_by_code(db, code);
     if (!prop) {
         ui_alert(UI_STYLE_ERROR, "Not Found", "Property not found.");
         ui_footer("Press any key to continue", "");
@@ -140,6 +145,7 @@ void menu_delete_property(PropertyManager *pm, const char *username) {
     
     if (strcmp(prop->username, username) != 0 && strcmp(username, "Admin") != 0) {
         ui_alert(UI_STYLE_ERROR, "Permission Denied", "You can only delete your own properties.");
+        free(prop);
         ui_footer("Press any key to continue", "");
         _getch();
         return;
@@ -148,6 +154,7 @@ void menu_delete_property(PropertyManager *pm, const char *username) {
     ui_clear();
     ui_header("CONFIRM DELETION", "Review property details before deleting");
     property_print(prop);
+    free(prop);
     
     bool confirm = false;
     ui_confirm("This action cannot be undone. Delete this property?", &confirm);
@@ -155,7 +162,7 @@ void menu_delete_property(PropertyManager *pm, const char *username) {
     if (confirm) {
         ui_spinner_start("Deleting property...");
         Sleep(500);
-        bool success = property_manager_delete(pm, code);
+        bool success = db_property_delete(db, code);
         ui_spinner_stop();
         
         if (success) {
@@ -170,126 +177,284 @@ void menu_delete_property(PropertyManager *pm, const char *username) {
     _getch();
 }
 
-void menu_reports(PropertyManager *pm) {
-    const char *report_options[] = {
-        "All active properties",
-        "Residential properties for sale",
-        "Commercial properties for sale",
-        "Land properties for sale",
-        "Residential properties for rent",
-        "Commercial properties for rent",
-        "Land properties for rent",
-        "Filter by district (1-30)",
-        "Filter by location (N/S/E/W)",
-        "Filter by price range",
-        "Property statistics"
-    };
+void print_property_table(Property *props, int count, int start_idx) {
+    if (count == 0) {
+        ui_print_styled(UI_STYLE_MUTED, "  No properties found.\n");
+        return;
+    }
     
-    while (1) {
-        char time_str[20];
-        get_current_time(time_str, sizeof(time_str));
-        ui_clear();
-        ui_header("REPORTS & ANALYTICS", "View and filter property listings");
-        ui_status_bar("User", "REPORTS", time_str);
-        
-        ui_menu_start("REPORTS");
-        for (int i = 0; i < 11; i++) {
-            const char *label = i == 0 ? "All Properties" :
-                               i == 1 ? "Sell - Residential" :
-                               i == 2 ? "Sell - Commercial" :
-                               i == 3 ? "Sell - Land" :
-                               i == 4 ? "Rent - Residential" :
-                               i == 5 ? "Rent - Commercial" :
-                               i == 6 ? "Rent - Land" :
-                               i == 7 ? "By District" :
-                               i == 8 ? "By Location" :
-                               i == 9 ? "By Price Range" : "Statistics";
-            ui_menu_item(i + 1, label, report_options[i], false);
-        }
-        ui_print_styled(UI_STYLE_MUTED, "   0. Back to Main Menu\n");
-        
-        int choice = ui_menu_end("Select report", 0, 11);
-        
-        if (choice == 0) break;
-        
-        ui_clear();
-        ui_header("REPORT RESULTS", report_options[choice - 1]);
-        
-        switch (choice) {
-            case 1: property_manager_list_all(pm); break;
-            case 2: property_manager_list_by_type(pm, PROP_TYPE_RESIDENTIAL, PROP_ACTION_SELL); break;
-            case 3: property_manager_list_by_type(pm, PROP_TYPE_COMMERCIAL, PROP_ACTION_SELL); break;
-            case 4: property_manager_list_by_type(pm, PROP_TYPE_LAND, PROP_ACTION_SELL); break;
-            case 5: property_manager_list_by_type(pm, PROP_TYPE_RESIDENTIAL, PROP_ACTION_RENT); break;
-            case 6: property_manager_list_by_type(pm, PROP_TYPE_COMMERCIAL, PROP_ACTION_RENT); break;
-            case 7: property_manager_list_by_type(pm, PROP_TYPE_LAND, PROP_ACTION_RENT); break;
-            case 8: {
-                int district;
-                if (ui_form_field_int("District", &district, 1, 30, "1-30")) {
-                    property_manager_list_by_district(pm, district);
-                }
-                break;
-            }
-            case 9: {
-                const char *locations[] = {"North", "South", "East", "West"};
-                int loc_idx;
-                if (ui_form_field_enum("Location", locations, 4, &loc_idx, "Select location")) {
-                    property_manager_list_by_location(pm, (Location)loc_idx);
-                }
-                break;
-            }
-            case 10: {
-                double min, max;
-                if (ui_form_field_double("Min Price", &min, 0, 1e12, "Minimum price") &&
-                    ui_form_field_double("Max Price", &max, min, 1e12, "Maximum price")) {
-                    property_manager_list_by_price_range(pm, min, max);
-                }
-                break;
-            }
-            case 11: {
-                const char *headers[] = {"Category", "Count"};
-                int widths[] = {35, 10};
-                ui_table_start(headers, 2, widths);
-                
-                char cells[2][64];
-                snprintf(cells[0], 64, "%d", property_count_by_type(pm, PROP_TYPE_RESIDENTIAL, PROP_ACTION_SELL));
-                snprintf(cells[1], 64, "%d", property_count_by_type(pm, PROP_TYPE_COMMERCIAL, PROP_ACTION_SELL));
-                ui_table_row((const char*[]){"Sell - Residential", cells[0]}, 2);
-                ui_table_row((const char*[]){"Sell - Commercial", cells[1]}, 2);
-                
-                snprintf(cells[0], 64, "%d", property_count_by_type(pm, PROP_TYPE_LAND, PROP_ACTION_SELL));
-                snprintf(cells[1], 64, "%d", property_count_by_type(pm, PROP_TYPE_RESIDENTIAL, PROP_ACTION_RENT));
-                ui_table_row((const char*[]){"Sell - Land", cells[0]}, 2);
-                ui_table_row((const char*[]){"Rent - Residential", cells[1]}, 2);
-                
-                snprintf(cells[0], 64, "%d", property_count_by_type(pm, PROP_TYPE_COMMERCIAL, PROP_ACTION_RENT));
-                snprintf(cells[1], 64, "%d", property_count_by_type(pm, PROP_TYPE_LAND, PROP_ACTION_RENT));
-                ui_table_row((const char*[]){"Rent - Commercial", cells[0]}, 2);
-                ui_table_row((const char*[]){"Rent - Land", cells[1]}, 2);
-                
-                int total = property_count_by_type(pm, PROP_TYPE_RESIDENTIAL, PROP_ACTION_SELL) +
-                           property_count_by_type(pm, PROP_TYPE_COMMERCIAL, PROP_ACTION_SELL) +
-                           property_count_by_type(pm, PROP_TYPE_LAND, PROP_ACTION_SELL) +
-                           property_count_by_type(pm, PROP_TYPE_RESIDENTIAL, PROP_ACTION_RENT) +
-                           property_count_by_type(pm, PROP_TYPE_COMMERCIAL, PROP_ACTION_RENT) +
-                           property_count_by_type(pm, PROP_TYPE_LAND, PROP_ACTION_RENT);
-                snprintf(cells[0], 64, "%d", total);
-                ui_table_row((const char*[]){"TOTAL ACTIVE", cells[0]}, 2);
-                
-                ui_table_end();
-                break;
-            }
-        }
-        ui_footer("Press any key to continue", "");
-        _getch();
+    ui_print_styled(UI_STYLE_PRIMARY, "  %-5s %-10s %-12s %-8s %-10s %-12s\n", 
+        "#", "Code", "Type", "Action", "District", "Price");
+    ui_divider();
+    
+    for (int i = 0; i < count; i++) {
+        double price = (props[i].action == PROP_ACTION_SELL) ? props[i].sell_price : props[i].monthly_price;
+        ui_print_styled(UI_STYLE_DEFAULT, "  %-5d %-10s %-12s %-8s %-10d %.2f\n",
+            start_idx + i + 1,
+            props[i].code,
+            property_type_to_string(props[i].ptype),
+            property_action_to_string(props[i].action),
+            props[i].district,
+            price);
     }
 }
 
-void menu_user_settings(UserManager *um, const char *username) {
-    user_edit_profile(um, username);
+void print_property_table_detailed(Property *props, int count, int start_idx) {
+    if (count == 0) {
+        ui_print_styled(UI_STYLE_MUTED, "  No properties found.\n");
+        return;
+    }
+    
+    for (int i = 0; i < count; i++) {
+        property_print(&props[i]);
+    }
 }
 
-void menu_admin(UserManager *um, PropertyManager *pm) {
+void menu_search_properties(Database *db, const char *username) {
+    int search_type = 0;
+    char where_clause[512] = "";
+    char order_by[128] = "date DESC";
+    int page = 0;
+    int total_pages = 1;
+    int total_count = 0;
+    Property *props = NULL;
+    int count = 0;
+    
+    while (1) {
+        ui_clear();
+        ui_header("SEARCH PROPERTIES", "Find properties with filters");
+        ui_status_bar(username, "SEARCH", "");
+        
+        const char *search_options[] = {
+            "All properties (paginated)",
+            "By type (Sell/Rent + Residential/Commercial/Land)",
+            "By district (1-30)",
+            "By location (N/S/E/W)",
+            "By price range",
+            "By keyword in address",
+            "Sort options",
+            "View property details"
+        };
+        
+        ui_menu_start("SEARCH MENU");
+        for (int i = 0; i < 8; i++) {
+            ui_menu_item(i + 1, 
+                i == 0 ? "All Properties" :
+                i == 1 ? "By Type" :
+                i == 2 ? "By District" :
+                i == 3 ? "By Location" :
+                i == 4 ? "By Price" :
+                i == 5 ? "By Keyword" :
+                i == 6 ? "Sort Options" : "View Details",
+                search_options[i], false);
+        }
+        ui_print_styled(UI_STYLE_MUTED, "  0. Back to Main Menu\n");
+        
+        int choice = ui_menu_end("Select option", 0, 8);
+        
+        if (choice == 0) break;
+        
+        memset(where_clause, 0, sizeof(where_clause));
+        page = 0;
+        
+        switch (choice) {
+            case 1: break;
+            case 2: {
+                ui_clear();
+                ui_header("FILTER BY TYPE", "Select property type and action");
+                
+                const char *type_options[] = {
+                    "Sell - Residential", "Sell - Commercial", "Sell - Land",
+                    "Rent - Residential", "Rent - Commercial", "Rent - Land"
+                };
+                int type_choice;
+                if (!ui_form_field_int("Select type", &type_choice, 1, 6, "1-6")) break;
+                
+                PropertyType ptype;
+                PropertyAction action;
+                switch (type_choice) {
+                    case 1: ptype = PROP_TYPE_RESIDENTIAL; action = PROP_ACTION_SELL; break;
+                    case 2: ptype = PROP_TYPE_COMMERCIAL; action = PROP_ACTION_SELL; break;
+                    case 3: ptype = PROP_TYPE_LAND; action = PROP_ACTION_SELL; break;
+                    case 4: ptype = PROP_TYPE_RESIDENTIAL; action = PROP_ACTION_RENT; break;
+                    case 5: ptype = PROP_TYPE_COMMERCIAL; action = PROP_ACTION_RENT; break;
+                    case 6: ptype = PROP_TYPE_LAND; action = PROP_ACTION_RENT; break;
+                }
+                snprintf(where_clause, sizeof(where_clause), "ptype = %d AND action = %d", ptype, action);
+                break;
+            }
+            case 3: {
+                int district;
+                if (ui_form_field_int("District", &district, 1, 30, "1-30")) {
+                    snprintf(where_clause, sizeof(where_clause), "district = %d", district);
+                }
+                break;
+            }
+            case 4: {
+                const char *locations[] = {"North", "South", "East", "West"};
+                int loc_idx;
+                if (ui_form_field_enum("Location", locations, 4, &loc_idx, "Select location")) {
+                    snprintf(where_clause, sizeof(where_clause), "location = %d", loc_idx);
+                }
+                break;
+            }
+            case 5: {
+                double min, max;
+                if (ui_form_field_double("Min Price", &min, 0, 1e12, "Minimum price") &&
+                    ui_form_field_double("Max Price", &max, min, 1e12, "Maximum price")) {
+                    snprintf(where_clause, sizeof(where_clause), 
+                        "(action = %d AND sell_price BETWEEN %.2f AND %.2f) OR "
+                        "(action = %d AND monthly_price BETWEEN %.2f AND %.2f)",
+                        PROP_ACTION_SELL, min, max, PROP_ACTION_RENT, min, max);
+                }
+                break;
+            }
+            case 6: {
+                char keyword[128];
+                if (ui_form_field("Keyword", keyword, sizeof(keyword), NULL, "Search in address")) {
+                    snprintf(where_clause, sizeof(where_clause), "address LIKE '%%%s%%'", keyword);
+                }
+                break;
+            }
+            case 7: {
+                const char *sort_options[] = {
+                    "Date (newest first)", "Date (oldest first)",
+                    "Price (low to high)", "Price (high to low)",
+                    "District", "Floor Area"
+                };
+                int sort_choice;
+                if (ui_form_field_int("Sort by", &sort_choice, 1, 6, "1-6")) break;
+                
+                switch (sort_choice) {
+                    case 1: strcpy(order_by, "date DESC"); break;
+                    case 2: strcpy(order_by, "date ASC"); break;
+                    case 3: strcpy(order_by, 
+                        "(CASE WHEN action=0 THEN sell_price ELSE monthly_price END) ASC"); break;
+                    case 4: strcpy(order_by, 
+                        "(CASE WHEN action=0 THEN sell_price ELSE monthly_price END) DESC"); break;
+                    case 5: strcpy(order_by, "district ASC"); break;
+                    case 6: strcpy(order_by, "floor_area DESC"); break;
+                }
+                ui_toast(UI_STYLE_SUCCESS, "Sort order updated");
+                break;
+            }
+            case 8: {
+                if (props) { free(props); props = NULL; }
+                break;
+            }
+        }
+        
+        if (choice >= 1 && choice <= 7) {
+            page = 0;
+        }
+        
+        if (choice == 8) {
+            if (!props || count == 0) {
+                ui_alert(UI_STYLE_WARNING, "No Results", "Perform a search first.");
+                continue;
+            }
+            
+            ui_clear();
+            ui_header("PROPERTY DETAILS", "Select a property to view full details");
+            
+            print_property_table(props, count, page * PAGE_SIZE);
+            
+            int detail_idx;
+            char prompt[64];
+            snprintf(prompt, sizeof(prompt), "Select property (1-%d, 0 to go back)", count);
+            if (!ui_form_field_int(prompt, &detail_idx, 0, count, prompt)) continue;
+            
+            if (detail_idx > 0) {
+                ui_clear();
+                ui_header("PROPERTY DETAILS", props[detail_idx - 1].code);
+                property_print(&props[detail_idx - 1]);
+                ui_footer("Press any key to continue", "");
+                _getch();
+            }
+            continue;
+        }
+        
+        if (props) { free(props); props = NULL; }
+        
+        total_count = db_property_count_filtered(db, where_clause);
+        total_pages = (total_count + PAGE_SIZE - 1) / PAGE_SIZE;
+        if (total_pages == 0) total_pages = 1;
+        
+        ui_spinner_start("Searching...");
+        Sleep(300);
+        int result = db_property_list_paginated(db, where_clause, order_by, PAGE_SIZE, page * PAGE_SIZE, &props, &count);
+        ui_spinner_stop();
+        
+        if (!result) {
+            ui_alert(UI_STYLE_ERROR, "Error", "Search failed");
+            continue;
+        }
+        
+        while (1) {
+            ui_clear();
+            ui_header("SEARCH RESULTS", "Matching properties");
+            ui_status_bar(username, "SEARCH", "");
+            
+            ui_print_styled(UI_STYLE_MUTED, "  Filters: %s\n", where_clause[0] ? where_clause : "None");
+            ui_print_styled(UI_STYLE_MUTED, "  Sort: %s  |  Page %d of %d  |  Total: %d\n\n", 
+                order_by, page + 1, total_pages, total_count);
+            
+            print_property_table(props, count, page * PAGE_SIZE);
+            
+            printf("\n");
+            ui_print_styled(UI_STYLE_INFO, "  Navigation: [n]ext  [p]rev  [d]etails  [s]ort  [c]lear  [b]ack\n");
+            
+            char nav[4];
+            safe_gets(nav, sizeof(nav));
+            
+            if (nav[0] == 'n' || nav[0] == 'N') {
+                if (page < total_pages - 1) {
+                    page++;
+                    free(props);
+                    db_property_list_paginated(db, where_clause, order_by, PAGE_SIZE, page * PAGE_SIZE, &props, &count);
+                } else {
+                    ui_toast(UI_STYLE_WARNING, "Already on last page");
+                }
+            } else if (nav[0] == 'p' || nav[0] == 'P') {
+                if (page > 0) {
+                    page--;
+                    free(props);
+                    db_property_list_paginated(db, where_clause, order_by, PAGE_SIZE, page * PAGE_SIZE, &props, &count);
+                } else {
+                    ui_toast(UI_STYLE_WARNING, "Already on first page");
+                }
+            } else if (nav[0] == 'd' || nav[0] == 'D') {
+                int detail_idx;
+                if (ui_form_field_int("Property number", &detail_idx, 1, count, "Enter number")) {
+                    ui_clear();
+                    ui_header("PROPERTY DETAILS", props[detail_idx - 1].code);
+                    property_print(&props[detail_idx - 1]);
+                    ui_footer("Press any key to continue", "");
+                    _getch();
+                }
+            } else if (nav[0] == 's' || nav[0] == 'S') {
+                break; // Go back to sort menu
+            } else if (nav[0] == 'c' || nav[0] == 'C') {
+                memset(where_clause, 0, sizeof(where_clause));
+                strcpy(order_by, "date DESC");
+                page = 0;
+                break;
+            } else if (nav[0] == 'b' || nav[0] == 'B') {
+                break;
+            }
+        }
+        
+        if (props) { free(props); props = NULL; }
+    }
+    
+    if (props) free(props);
+}
+
+void menu_user_settings(Database *db, const char *username) {
+    user_edit_profile(db, username);
+}
+
+void menu_admin(Database *db) {
     const char *admin_options[] = {
         "List all registered users",
         "View all properties (incl. inactive)",
@@ -312,7 +477,7 @@ void menu_admin(UserManager *um, PropertyManager *pm) {
                 i == 2 ? "Delete Property" : "Statistics",
                 admin_options[i], false);
         }
-        ui_print_styled(UI_STYLE_MUTED, "   0. Back\n");
+        ui_print_styled(UI_STYLE_MUTED, "  0. Back\n");
         
         int choice = ui_menu_end("Select option", 0, 4);
         
@@ -323,27 +488,37 @@ void menu_admin(UserManager *um, PropertyManager *pm) {
         
         switch (choice) {
             case 1: {
-                ui_print_styled(UI_STYLE_PRIMARY, "  %-20s %-20s %-15s %-25s\n", "Username", "Name", "Phone", "Email");
-                ui_divider();
-                for (int i = 0; i < um->count; i++) {
-                    printf("  %-20s %-20s %-15s %-25s\n",
-                        um->users[i].username,
-                        um->users[i].first_name,
-                        um->users[i].phone,
-                        um->users[i].email);
+                User *users = NULL;
+                int count = 0;
+                if (db_user_list_all(db, &users, &count)) {
+                    ui_print_styled(UI_STYLE_PRIMARY, "  %-20s %-20s %-15s %-25s\n", "Username", "Name", "Phone", "Email");
+                    ui_divider();
+                    for (int i = 0; i < count; i++) {
+                        printf("  %-20s %-20s %-15s %-25s\n",
+                            users[i].username,
+                            users[i].first_name,
+                            users[i].phone,
+                            users[i].email);
+                    }
+                    free(users);
                 }
                 break;
             }
             case 2: {
-                for (int i = 0; i < pm->count; i++) {
-                    property_print_short(&pm->properties[i]);
+                Property *props = NULL;
+                int count = 0;
+                if (db_property_list_paginated(db, "1=1", "date DESC", 0, 0, &props, &count)) {
+                    for (int i = 0; i < count; i++) {
+                        property_print_short(&props[i]);
+                    }
+                    free(props);
                 }
                 break;
             }
             case 3: {
                 char code[MAX_FIELD_LEN];
                 if (ui_form_field("Property Code", code, MAX_FIELD_LEN, NULL, "Enter code to force delete")) {
-                    if (property_manager_delete(pm, code)) {
+                    if (db_property_delete(db, code)) {
                         ui_alert(UI_STYLE_SUCCESS, "Deleted", "Property deleted successfully.");
                     } else {
                         ui_alert(UI_STYLE_ERROR, "Error", "Property not found.");
@@ -353,17 +528,23 @@ void menu_admin(UserManager *um, PropertyManager *pm) {
             }
             case 4: {
                 ui_print_styled(UI_STYLE_PRIMARY, "  System Statistics\n\n");
-                ui_print_styled(UI_STYLE_INFO, "  Total Users: %d\n", um->count);
-                ui_print_styled(UI_STYLE_INFO, "  Total Properties: %d\n", pm->count);
+                int user_count = db_user_count(db);
+                Property *props = NULL;
+                int prop_count = 0;
+                db_property_list_paginated(db, "1=1", "date DESC", 0, 0, &props, &prop_count);
                 
-                int active = property_count_by_type(pm, PROP_TYPE_RESIDENTIAL, PROP_ACTION_SELL) +
-                            property_count_by_type(pm, PROP_TYPE_COMMERCIAL, PROP_ACTION_SELL) +
-                            property_count_by_type(pm, PROP_TYPE_LAND, PROP_ACTION_SELL) +
-                            property_count_by_type(pm, PROP_TYPE_RESIDENTIAL, PROP_ACTION_RENT) +
-                            property_count_by_type(pm, PROP_TYPE_COMMERCIAL, PROP_ACTION_RENT) +
-                            property_count_by_type(pm, PROP_TYPE_LAND, PROP_ACTION_RENT);
+                int active = db_property_count_by_type(db, PROP_TYPE_RESIDENTIAL, PROP_ACTION_SELL) +
+                            db_property_count_by_type(db, PROP_TYPE_COMMERCIAL, PROP_ACTION_SELL) +
+                            db_property_count_by_type(db, PROP_TYPE_LAND, PROP_ACTION_SELL) +
+                            db_property_count_by_type(db, PROP_TYPE_RESIDENTIAL, PROP_ACTION_RENT) +
+                            db_property_count_by_type(db, PROP_TYPE_COMMERCIAL, PROP_ACTION_RENT) +
+                            db_property_count_by_type(db, PROP_TYPE_LAND, PROP_ACTION_RENT);
+                
+                ui_print_styled(UI_STYLE_INFO, "  Total Users: %d\n", user_count);
+                ui_print_styled(UI_STYLE_INFO, "  Total Properties: %d\n", prop_count);
                 ui_print_styled(UI_STYLE_SUCCESS, "  Active Properties: %d\n", active);
-                ui_print_styled(UI_STYLE_WARNING, "  Inactive Properties: %d\n", pm->count - active);
+                ui_print_styled(UI_STYLE_WARNING, "  Inactive Properties: %d\n", prop_count - active);
+                if (props) free(props);
                 break;
             }
         }
