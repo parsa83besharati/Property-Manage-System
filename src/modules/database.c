@@ -85,6 +85,7 @@ void database_close(Database *db) {
 }
 
 int database_init_schema(Database *db) {
+    if (!db) return 0;
     char *err_msg = NULL;
     int rc = sqlite3_exec(db->db, SCHEMA_SQL, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
@@ -184,6 +185,7 @@ static void row_to_property(sqlite3_stmt *stmt, Property *prop) {
 }
 
 int db_user_create(Database *db, const User *user) {
+    if (!db || !user) return 0;
     const char *sql = "INSERT INTO users (username, first_name, last_name, id, phone, email, password_hash, salt) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     sqlite3_stmt *stmt;
@@ -197,6 +199,7 @@ int db_user_create(Database *db, const User *user) {
 }
 
 User *db_user_find_by_username(Database *db, const char *username) {
+    if (!db || !username) return NULL;
     const char *sql = "SELECT username, first_name, last_name, id, phone, email, password_hash, salt "
                       "FROM users WHERE username = ?";
     sqlite3_stmt *stmt;
@@ -215,6 +218,7 @@ User *db_user_find_by_username(Database *db, const char *username) {
 }
 
 int db_user_update_password(Database *db, const char *username, const char *hash, const char *salt) {
+    if (!db || !username || !hash || !salt) return 0;
     const char *sql = "UPDATE users SET password_hash = ?, salt = ? WHERE username = ?";
     sqlite3_stmt *stmt;
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
@@ -226,10 +230,11 @@ int db_user_update_password(Database *db, const char *username, const char *hash
     
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return rc == SQLITE_DONE;
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
 }
 
 int db_user_update_field(Database *db, const char *username, int field, const char *value) {
+    if (!db || !username || !value) return 0;
     const char *columns[] = {"", "first_name", "last_name", "id", "phone", "email"};
     if (field < 1 || field > 5) return 0;
     
@@ -245,10 +250,11 @@ int db_user_update_field(Database *db, const char *username, int field, const ch
     
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return rc == SQLITE_DONE;
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
 }
 
 int db_user_list_all(Database *db, User **users, int *count) {
+    if (!db || !users || !count) return 0;
     const char *sql = "SELECT username, first_name, last_name, id, phone, email, password_hash, salt FROM users";
     sqlite3_stmt *stmt;
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
@@ -271,6 +277,7 @@ int db_user_list_all(Database *db, User **users, int *count) {
 }
 
 int db_user_count(Database *db) {
+    if (!db) return 0;
     const char *sql = "SELECT COUNT(*) FROM users";
     sqlite3_stmt *stmt;
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
@@ -285,22 +292,30 @@ int db_user_count(Database *db) {
 }
 
 int db_property_create(Database *db, const Property *prop) {
+    if (!db || !prop) return 0;
     const char *sql = "INSERT INTO properties (code, district, address, location, ptype, action, subtype, "
                       "build_age, floor_area, floor, land_area, owner_phone, bedrooms, rooms, tax_rate, "
                       "elevator, basement, basement_area, balcony, balcony_area, parkings, phones, temperature, "
                       "sell_price, base_price, monthly_price, date, username, active) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     sqlite3_stmt *stmt;
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK) return 0;
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "db_property_create prepare failed: %s\n", sqlite3_errmsg(db->db));
+        return 0;
+    }
     
     bind_property_stmt(stmt, prop);
     rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE) {
+        fprintf(stderr, "db_property_create step failed: %s\n", sqlite3_errmsg(db->db));
+    }
     sqlite3_finalize(stmt);
     return rc == SQLITE_DONE;
 }
 
 Property *db_property_find_by_code(Database *db, const char *code) {
+    if (!db || !code) return NULL;
     const char *sql = "SELECT code, district, address, location, ptype, action, subtype, build_age, "
                       "floor_area, floor, land_area, owner_phone, bedrooms, rooms, tax_rate, elevator, "
                       "basement, basement_area, balcony, balcony_area, parkings, phones, temperature, "
@@ -322,6 +337,7 @@ Property *db_property_find_by_code(Database *db, const char *code) {
 }
 
 int db_property_delete(Database *db, const char *code) {
+    if (!db || !code) return 0;
     const char *sql = "UPDATE properties SET active = 0 WHERE code = ?";
     sqlite3_stmt *stmt;
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
@@ -330,11 +346,12 @@ int db_property_delete(Database *db, const char *code) {
     sqlite3_bind_text(stmt, 1, code, -1, SQLITE_STATIC);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    return rc == SQLITE_DONE;
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
 }
 
 static int property_query_with_filters(Database *db, const char *where_clause, const char *order_by, 
                                        int limit, int offset, Property **props, int *count) {
+    if (!db || !props || !count) return 0;
     char sql[1024];
     snprintf(sql, sizeof(sql), 
         "SELECT code, district, address, location, ptype, action, subtype, build_age, "
@@ -386,24 +403,28 @@ int db_property_list_all(Database *db, Property **props, int *count) {
 }
 
 int db_property_list_by_type(Database *db, PropertyType ptype, PropertyAction action, Property **props, int *count) {
+    if (!db || !props || !count) return 0;
     char where[128];
     snprintf(where, sizeof(where), "ptype = %d AND action = %d", ptype, action);
     return property_query_with_filters(db, where, "date DESC", 0, 0, props, count);
 }
 
 int db_property_list_by_district(Database *db, int district, Property **props, int *count) {
+    if (!db || !props || !count) return 0;
     char where[128];
     snprintf(where, sizeof(where), "district = %d", district);
     return property_query_with_filters(db, where, "date DESC", 0, 0, props, count);
 }
 
 int db_property_list_by_location(Database *db, Location location, Property **props, int *count) {
+    if (!db || !props || !count) return 0;
     char where[128];
     snprintf(where, sizeof(where), "location = %d", location);
     return property_query_with_filters(db, where, "date DESC", 0, 0, props, count);
 }
 
 int db_property_list_by_price_range(Database *db, double min, double max, Property **props, int *count) {
+    if (!db || !props || !count) return 0;
     char where[256];
     snprintf(where, sizeof(where), 
         "(action = %d AND sell_price BETWEEN %.2f AND %.2f) OR "
@@ -413,6 +434,7 @@ int db_property_list_by_price_range(Database *db, double min, double max, Proper
 }
 
 int db_property_count_by_type(Database *db, PropertyType ptype, PropertyAction action) {
+    if (!db) return 0;
     char sql[256];
     snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM properties WHERE active = 1 AND ptype = %d AND action = %d", ptype, action);
     
@@ -430,10 +452,12 @@ int db_property_count_by_type(Database *db, PropertyType ptype, PropertyAction a
 
 int db_property_list_paginated(Database *db, const char *where_clause, const char *order_by, 
                                int limit, int offset, Property **props, int *count) {
+    if (!db || !props || !count) return 0;
     return property_query_with_filters(db, where_clause, order_by, limit, offset, props, count);
 }
 
 int db_property_count_filtered(Database *db, const char *where_clause) {
+    if (!db) return 0;
     char sql[1024];
     snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM properties WHERE active = 1");
     if (where_clause && strlen(where_clause) > 0) {
@@ -454,6 +478,7 @@ int db_property_count_filtered(Database *db, const char *where_clause) {
 }
 
 int database_migrate_from_files(Database *db, const char *users_file, const char *properties_file) {
+    if (!db || !users_file || !properties_file) return 0;
     FILE *uf = fopen(users_file, "r");
     if (uf) {
         char line[2048];

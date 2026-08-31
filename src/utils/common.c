@@ -45,8 +45,10 @@ void capitalize_words(char *str) {
 
 int validate_int_range(const char *str, int min, int max, int *out) {
     char *endptr;
+    errno = 0;
     long val = strtol(str, &endptr, 10);
     if (endptr == str || *endptr != '\0') return 0;
+    if (errno == ERANGE) return 0;
     if (val < min || val > max) return 0;
     *out = (int)val;
     return 1;

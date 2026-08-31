@@ -37,6 +37,9 @@ test_hash.exe
 test_sqlite.c
 test_sqlite.exe
 
+# Old monolithic source (replaced by modular src/)
+Property_manage_system.c
+
 # SQLite amalgamation (downloaded, not source)
 sqlite-amalgamation/
 sqlite-amalgamation.zip
