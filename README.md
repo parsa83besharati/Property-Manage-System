@@ -273,7 +273,7 @@ Single `Property` struct with enums for type/action:
 
 ## License
 
-License: This project is licensed under the MIT License. See the LICENSE file for details.
+[License](LICENSE): This project is licensed under the MIT License.
 
 ## Troubleshooting
 
