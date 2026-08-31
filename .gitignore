@@ -34,3 +34,9 @@ Thumbs.db
 *.temp
 test_hash.c
 test_hash.exe
+test_sqlite.c
+test_sqlite.exe
+
+# SQLite amalgamation (downloaded, not source)
+sqlite-amalgamation/
+sqlite-amalgamation.zip
