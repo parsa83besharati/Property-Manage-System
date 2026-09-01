@@ -39,4 +39,18 @@ int db_property_count_filtered(Database *db, const char *where_clause);
 // Migration
 int database_migrate_from_files(Database *db, const char *users_file, const char *properties_file);
 
+// Lease operations
+int db_lease_create(Database *db, const Lease *lease);
+Lease *db_lease_find_by_id(Database *db, int id);
+int db_lease_update(Database *db, const Lease *lease);
+int db_lease_delete(Database *db, int id);
+int db_lease_list_all(Database *db, Lease **leases, int *count);
+int db_lease_list_by_tenant(Database *db, const char *username, Lease **leases, int *count);
+int db_lease_list_by_property(Database *db, const char *property_code, Lease **leases, int *count);
+int db_lease_list_by_status(Database *db, LeaseStatus status, Lease **leases, int *count);
+int db_lease_list_expiring(Database *db, int days_ahead, Lease **leases, int *count);
+int db_lease_count(Database *db);
+int db_lease_count_by_tenant(Database *db, const char *username);
+int db_lease_count_by_property(Database *db, const char *property_code);
+
 #endif

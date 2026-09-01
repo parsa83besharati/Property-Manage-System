@@ -53,11 +53,30 @@ static const char *SCHEMA_SQL =
     "    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
     "    FOREIGN KEY (username) REFERENCES users(username)"
     ");"
+    "CREATE TABLE IF NOT EXISTS leases ("
+    "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "    property_code TEXT NOT NULL,"
+    "    tenant_username TEXT NOT NULL,"
+    "    start_date TEXT NOT NULL,"
+    "    end_date TEXT NOT NULL,"
+    "    monthly_rent REAL NOT NULL,"
+    "    deposit REAL NOT NULL,"
+    "    payment_day INTEGER NOT NULL,"
+    "    status INTEGER DEFAULT 0,"
+    "    auto_renew INTEGER DEFAULT 0,"
+    "    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+    "    FOREIGN KEY (property_code) REFERENCES properties(code),"
+    "    FOREIGN KEY (tenant_username) REFERENCES users(username)"
+    ");"
     "CREATE INDEX IF NOT EXISTS idx_properties_type_action ON properties(ptype, action);"
     "CREATE INDEX IF NOT EXISTS idx_properties_district ON properties(district);"
     "CREATE INDEX IF NOT EXISTS idx_properties_location ON properties(location);"
     "CREATE INDEX IF NOT EXISTS idx_properties_username ON properties(username);"
-    "CREATE INDEX IF NOT EXISTS idx_properties_active ON properties(active);";
+    "CREATE INDEX IF NOT EXISTS idx_properties_active ON properties(active);"
+    "CREATE INDEX IF NOT EXISTS idx_leases_tenant ON leases(tenant_username);"
+    "CREATE INDEX IF NOT EXISTS idx_leases_property ON leases(property_code);"
+    "CREATE INDEX IF NOT EXISTS idx_leases_status ON leases(status);"
+    "CREATE INDEX IF NOT EXISTS idx_leases_dates ON leases(start_date, end_date);";
 
 Database *database_open(const char *path) {
     Database *db = malloc(sizeof(Database));
@@ -189,6 +208,20 @@ static void row_to_property(sqlite3_stmt *stmt, Property *prop) {
     strncpy(prop->image_path, (const char*)sqlite3_column_text(stmt, 27), MAX_STRING_LEN - 1);
     strncpy(prop->username, (const char*)sqlite3_column_text(stmt, 28), MAX_FIELD_LEN - 1);
     prop->active = sqlite3_column_int(stmt, 29);
+}
+
+static void row_to_lease(sqlite3_stmt *stmt, Lease *lease) {
+    lease->id = sqlite3_column_int(stmt, 0);
+    strncpy(lease->property_code, (const char*)sqlite3_column_text(stmt, 1), MAX_FIELD_LEN - 1);
+    strncpy(lease->tenant_username, (const char*)sqlite3_column_text(stmt, 2), MAX_FIELD_LEN - 1);
+    strncpy(lease->start_date, (const char*)sqlite3_column_text(stmt, 3), MAX_FIELD_LEN - 1);
+    strncpy(lease->end_date, (const char*)sqlite3_column_text(stmt, 4), MAX_FIELD_LEN - 1);
+    lease->monthly_rent = sqlite3_column_double(stmt, 5);
+    lease->deposit = sqlite3_column_double(stmt, 6);
+    lease->payment_day = sqlite3_column_int(stmt, 7);
+    lease->status = (LeaseStatus)sqlite3_column_int(stmt, 8);
+    lease->auto_renew = sqlite3_column_int(stmt, 9);
+    strncpy(lease->created_at, (const char*)sqlite3_column_text(stmt, 10), MAX_FIELD_LEN - 1);
 }
 
 int db_user_create(Database *db, const User *user) {
@@ -328,6 +361,279 @@ UserRole db_user_get_role(Database *db, const char *username) {
     }
     sqlite3_finalize(stmt);
     return role;
+}
+
+// ============================================================================
+// LEASE OPERATIONS
+// ============================================================================
+
+int db_lease_create(Database *db, const Lease *lease) {
+    if (!db || !lease) return 0;
+    const char *sql = "INSERT INTO leases (property_code, tenant_username, start_date, end_date, "
+                      "monthly_rent, deposit, payment_day, status, auto_renew) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, lease->property_code, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, lease->tenant_username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, lease->start_date, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, lease->end_date, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 5, lease->monthly_rent);
+    sqlite3_bind_double(stmt, 6, lease->deposit);
+    sqlite3_bind_int(stmt, 7, lease->payment_day);
+    sqlite3_bind_int(stmt, 8, lease->status);
+    sqlite3_bind_int(stmt, 9, lease->auto_renew);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE;
+}
+
+Lease *db_lease_find_by_id(Database *db, int id) {
+    if (!db) return NULL;
+    const char *sql = "SELECT id, property_code, tenant_username, start_date, end_date, "
+                      "monthly_rent, deposit, payment_day, status, auto_renew, created_at "
+                      "FROM leases WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return NULL;
+    
+    sqlite3_bind_int(stmt, 1, id);
+    
+    Lease *lease = NULL;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        lease = malloc(sizeof(Lease));
+        row_to_lease(stmt, lease);
+    }
+    sqlite3_finalize(stmt);
+    return lease;
+}
+
+int db_lease_update(Database *db, const Lease *lease) {
+    if (!db || !lease) return 0;
+    const char *sql = "UPDATE leases SET property_code = ?, tenant_username = ?, start_date = ?, "
+                      "end_date = ?, monthly_rent = ?, deposit = ?, payment_day = ?, "
+                      "status = ?, auto_renew = ? WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, lease->property_code, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, lease->tenant_username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, lease->start_date, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, lease->end_date, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 5, lease->monthly_rent);
+    sqlite3_bind_double(stmt, 6, lease->deposit);
+    sqlite3_bind_int(stmt, 7, lease->payment_day);
+    sqlite3_bind_int(stmt, 8, lease->status);
+    sqlite3_bind_int(stmt, 9, lease->auto_renew);
+    sqlite3_bind_int(stmt, 10, lease->id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
+}
+
+int db_lease_delete(Database *db, int id) {
+    if (!db) return 0;
+    const char *sql = "DELETE FROM leases WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
+}
+
+int db_lease_list_all(Database *db, Lease **leases, int *count) {
+    if (!db || !leases || !count) return 0;
+    const char *sql = "SELECT id, property_code, tenant_username, start_date, end_date, "
+                      "monthly_rent, deposit, payment_day, status, auto_renew, created_at "
+                      "FROM leases ORDER BY id DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int capacity = 100;
+    *leases = malloc(capacity * sizeof(Lease));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *leases = realloc(*leases, capacity * sizeof(Lease));
+        }
+        row_to_lease(stmt, &(*leases)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_lease_list_by_tenant(Database *db, const char *username, Lease **leases, int *count) {
+    if (!db || !username || !leases || !count) return 0;
+    const char *sql = "SELECT id, property_code, tenant_username, start_date, end_date, "
+                      "monthly_rent, deposit, payment_day, status, auto_renew, created_at "
+                      "FROM leases WHERE tenant_username = ? ORDER BY id DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    
+    int capacity = 100;
+    *leases = malloc(capacity * sizeof(Lease));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *leases = realloc(*leases, capacity * sizeof(Lease));
+        }
+        row_to_lease(stmt, &(*leases)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_lease_list_by_property(Database *db, const char *property_code, Lease **leases, int *count) {
+    if (!db || !property_code || !leases || !count) return 0;
+    const char *sql = "SELECT id, property_code, tenant_username, start_date, end_date, "
+                      "monthly_rent, deposit, payment_day, status, auto_renew, created_at "
+                      "FROM leases WHERE property_code = ? ORDER BY id DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, property_code, -1, SQLITE_STATIC);
+    
+    int capacity = 100;
+    *leases = malloc(capacity * sizeof(Lease));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *leases = realloc(*leases, capacity * sizeof(Lease));
+        }
+        row_to_lease(stmt, &(*leases)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_lease_list_by_status(Database *db, LeaseStatus status, Lease **leases, int *count) {
+    if (!db || !leases || !count) return 0;
+    const char *sql = "SELECT id, property_code, tenant_username, start_date, end_date, "
+                      "monthly_rent, deposit, payment_day, status, auto_renew, created_at "
+                      "FROM leases WHERE status = ? ORDER BY id DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, (int)status);
+    
+    int capacity = 100;
+    *leases = malloc(capacity * sizeof(Lease));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *leases = realloc(*leases, capacity * sizeof(Lease));
+        }
+        row_to_lease(stmt, &(*leases)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_lease_list_expiring(Database *db, int days_ahead, Lease **leases, int *count) {
+    if (!db || !leases || !count) return 0;
+    char sql[512];
+    snprintf(sql, sizeof(sql),
+        "SELECT id, property_code, tenant_username, start_date, end_date, "
+        "monthly_rent, deposit, payment_day, status, auto_renew, created_at "
+        "FROM leases "
+        "WHERE status = %d "
+        "AND date(end_date) BETWEEN date('now') AND date('now', '+%d days') "
+        "ORDER BY end_date ASC", LEASE_STATUS_ACTIVE, days_ahead);
+    
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int capacity = 100;
+    *leases = malloc(capacity * sizeof(Lease));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *leases = realloc(*leases, capacity * sizeof(Lease));
+        }
+        row_to_lease(stmt, &(*leases)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_lease_count(Database *db) {
+    if (!db) return 0;
+    const char *sql = "SELECT COUNT(*) FROM leases";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+int db_lease_count_by_tenant(Database *db, const char *username) {
+    if (!db || !username) return 0;
+    const char *sql = "SELECT COUNT(*) FROM leases WHERE tenant_username = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+int db_lease_count_by_property(Database *db, const char *property_code) {
+    if (!db || !property_code) return 0;
+    const char *sql = "SELECT COUNT(*) FROM leases WHERE property_code = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, property_code, -1, SQLITE_STATIC);
+    
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
 }
 
 int db_property_create(Database *db, const Property *prop) {

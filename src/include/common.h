@@ -140,6 +140,33 @@ typedef struct {
     int capacity;
 } UserList;
 
+typedef enum {
+    LEASE_STATUS_ACTIVE,
+    LEASE_STATUS_EXPIRED,
+    LEASE_STATUS_TERMINATED,
+    LEASE_STATUS_PENDING
+} LeaseStatus;
+
+typedef struct {
+    int id;
+    char property_code[MAX_FIELD_LEN];
+    char tenant_username[MAX_FIELD_LEN];
+    char start_date[MAX_FIELD_LEN];
+    char end_date[MAX_FIELD_LEN];
+    double monthly_rent;
+    double deposit;
+    int payment_day;
+    LeaseStatus status;
+    bool auto_renew;
+    char created_at[MAX_FIELD_LEN];
+} Lease;
+
+typedef struct {
+    Lease *leases;
+    int count;
+    int capacity;
+} LeaseList;
+
 void safe_gets(char *buffer, int size);
 void trim_newline(char *str);
 void str_to_lower(char *str);
