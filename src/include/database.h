@@ -54,25 +54,6 @@ int db_lease_count_by_tenant(Database *db, const char *username);
 int db_lease_count_by_property(Database *db, const char *property_code);
 
 // Payment operations
-typedef struct {
-    int id;
-    int lease_id;
-    double amount;
-    char payment_date[MAX_FIELD_LEN];
-    char due_date[MAX_FIELD_LEN];
-    int is_late;
-    double late_fee;
-    char notes[MAX_STRING_LEN];
-    char recorded_by[MAX_FIELD_LEN];
-    char created_at[MAX_FIELD_LEN];
-} Payment;
-
-typedef struct {
-    Payment *payments;
-    int count;
-    int capacity;
-} PaymentList;
-
 int db_payment_create(Database *db, const Payment *payment);
 Payment *db_payment_find_by_id(Database *db, int id);
 int db_payment_list_by_lease(Database *db, int lease_id, Payment **payments, int *count);

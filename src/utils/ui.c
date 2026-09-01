@@ -4,48 +4,109 @@
 #include <string.h>
 #include <stdarg.h>
 #include <time.h>
+
+#ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <sys/ioctl.h>
+#endif
 
+#ifdef _WIN32
 static HANDLE console_handle = NULL;
 static CONSOLE_SCREEN_BUFFER_INFO original_console_info;
+static DWORD original_console_mode;
+#else
+static struct termios original_termios;
+static int term_initialized = 0;
+#endif
+
 static bool ui_initialized = false;
 static int spinner_state = 0;
+#ifdef _WIN32
 static DWORD spinner_thread_id = 0;
 static HANDLE spinner_thread = NULL;
+#else
+static pthread_t spinner_thread;
+#endif
 static volatile bool spinner_running = false;
 static char spinner_label[100] = {0};
 
 static const char *spinner_frames[] = {"|", "/", "-", "\\", "|", "/", "-", "\\"};
 
+#ifdef _WIN32
 static DWORD WINAPI spinner_loop(LPVOID param) {
+    (void)param;
+#else
+static void *spinner_loop(void *param) {
+    (void)param;
+#endif
     while (spinner_running) {
         ui_set_style(UI_STYLE_INFO);
-        printf("\r%s %s", spinner_frames[spinner_state % 10], spinner_label);
+        printf("\r%s %s", spinner_frames[spinner_state % 8], spinner_label);
         fflush(stdout);
         spinner_state++;
+#ifdef _WIN32
         Sleep(80);
+#else
+        usleep(80000);
+#endif
     }
     printf("\r%*s\r", (int)strlen(spinner_label) + 4, "");
     fflush(stdout);
+#ifdef _WIN32
     return 0;
+#else
+    return NULL;
+#endif
 }
 
 void ui_init(void) {
     if (ui_initialized) return;
     
+#ifdef _WIN32
     console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
     GetConsoleScreenBufferInfo(console_handle, &original_console_info);
-    
-    DWORD mode;
-    GetConsoleMode(console_handle, &mode);
-    SetConsoleMode(console_handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    GetConsoleMode(console_handle, &original_console_mode);
+    SetConsoleMode(console_handle, original_console_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+#else
+    if (!term_initialized) {
+        tcgetattr(STDIN_FILENO, &original_termios);
+        struct termios raw = original_termios;
+        raw.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+        term_initialized = 1;
+    }
+    printf("\033[?1049h"); // Enter alternate screen buffer
+#endif
     
     ui_initialized = true;
 }
 
+void ui_cleanup(void) {
+    if (!ui_initialized) return;
+    
+#ifdef _WIN32
+    SetConsoleMode(console_handle, original_console_mode);
+#else
+    if (term_initialized) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
+        term_initialized = 0;
+    }
+    printf("\033[?1049l"); // Exit alternate screen buffer
+#endif
+    ui_initialized = false;
+}
+
 void ui_clear(void) {
+#ifdef _WIN32
     system("cls");
+#else
+    system("clear");
+#endif
 }
 
 void ui_reset_color(void) {
@@ -294,7 +355,6 @@ int ui_form_field(const char *label, char *buffer, int maxlen, int (*validator)(
         }
         
         ui_print_styled(UI_STYLE_SUCCESS, "  + Valid\n");
-        Sleep(300);
         return 1;
     }
 }
@@ -318,7 +378,6 @@ int ui_form_field_int(const char *label, int *out, int min, int max, const char 
             continue;
         }
         *out = (int)val;
-        Sleep(300);
         return 1;
     }
 }
@@ -342,7 +401,6 @@ int ui_form_field_double(const char *label, double *out, double min, double max,
             continue;
         }
         *out = val;
-        Sleep(300);
         return 1;
     }
 }
@@ -370,12 +428,59 @@ int ui_form_field_enum(const char *label, const char *options[], int count, int 
         if (choice >= 1 && choice <= count) {
             *out = choice - 1;
             ui_print_styled(UI_STYLE_SUCCESS, "  + Selected: %s\n", options[choice - 1]);
-            Sleep(300);
             return 1;
         }
         ui_print_styled(UI_STYLE_ERROR, "  ! Invalid choice. Enter 1-%d\n", count);
     }
 }
+
+#ifdef _WIN32
+void get_password_hidden(char *buffer, int maxlen) {
+    int i = 0;
+    char ch;
+    while (i < maxlen - 1) {
+        ch = _getch();
+        if (ch == '\r' || ch == '\n') break;
+        if (ch == '\b' || ch == 127) {
+            if (i > 0) {
+                i--;
+                printf("\b \b");
+            }
+        } else {
+            buffer[i++] = ch;
+            printf("*");
+        }
+    }
+    buffer[i] = '\0';
+    printf("\n");
+}
+#else
+void get_password_hidden(char *buffer, int maxlen) {
+    struct termios old, new;
+    tcgetattr(STDIN_FILENO, &old);
+    new = old;
+    new.c_lflag &= ~ECHO;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &new);
+    
+    int i = 0;
+    int ch;
+    while (i < maxlen - 1 && (ch = getchar()) != EOF && ch != '\n') {
+        if (ch == 127 || ch == '\b') {
+            if (i > 0) {
+                i--;
+                printf("\b \b");
+            }
+        } else {
+            buffer[i++] = ch;
+            printf("*");
+        }
+    }
+    buffer[i] = '\0';
+    printf("\n");
+    
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &old);
+}
+#endif
 
 int ui_form_field_password(const char *label, char *buffer, int maxlen, const char *hint) {
     while (1) {
@@ -396,7 +501,6 @@ int ui_form_field_password(const char *label, char *buffer, int maxlen, const ch
         }
         
         ui_print_styled(UI_STYLE_SUCCESS, "  + Entered\n");
-        Sleep(300);
         return 1;
     }
 }
@@ -473,17 +577,28 @@ void ui_spinner_start(const char *label) {
     spinner_label[sizeof(spinner_label) - 1] = '\0';
     spinner_running = true;
     spinner_state = 0;
+#ifdef _WIN32
     spinner_thread = CreateThread(NULL, 0, spinner_loop, NULL, 0, &spinner_thread_id);
+#else
+    pthread_create(&spinner_thread, NULL, spinner_loop, NULL);
+#endif
 }
 
 void ui_spinner_stop(void) {
     if (!spinner_running) return;
     spinner_running = false;
+#ifdef _WIN32
     if (spinner_thread) {
         WaitForSingleObject(spinner_thread, 1000);
         CloseHandle(spinner_thread);
         spinner_thread = NULL;
     }
+#else
+    if (spinner_thread) {
+        pthread_join(spinner_thread, NULL);
+        spinner_thread = 0;
+    }
+#endif
 }
 
 void ui_alert(UIStyle style, const char *title, const char *message) {
@@ -518,15 +633,24 @@ void ui_toast(UIStyle style, const char *message) {
     ui_set_style(style);
     printf("  > %s\n", message);
     ui_reset_color();
+#ifdef _WIN32
     Sleep(1000);
+#else
+    sleep(1);
+#endif
 }
 
 void ui_pause(const char *message) {
     ui_set_style(UI_STYLE_MUTED);
     if (message) printf("\n  %s", message);
-    else printf("\n  Press any key to continue...");
+    else printf("\n  Press Enter to continue...");
     ui_reset_color();
+    
+#ifdef _WIN32
     _getch();
+#else
+    getchar();
+#endif
     printf("\n");
 }
 

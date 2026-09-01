@@ -240,13 +240,14 @@ static void row_to_lease(sqlite3_stmt *stmt, Lease *lease) {
 
 int db_user_create(Database *db, const User *user) {
     if (!db || !user) return 0;
-    const char *sql = "INSERT INTO users (username, first_name, last_name, id, phone, email, password_hash, salt) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    const char *sql = "INSERT INTO users (username, first_name, last_name, id, phone, email, password_hash, salt, role) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
     sqlite3_stmt *stmt;
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) return 0;
     
     bind_user_stmt(stmt, user);
+    sqlite3_bind_int(stmt, 9, (int)user->role);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     return rc == SQLITE_DONE;

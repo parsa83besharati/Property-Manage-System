@@ -168,6 +168,19 @@ typedef struct {
 } LeaseList;
 
 typedef struct {
+    int id;
+    int lease_id;
+    double amount;
+    char payment_date[MAX_FIELD_LEN];
+    char due_date[MAX_FIELD_LEN];
+    int is_late;
+    double late_fee;
+    char notes[MAX_STRING_LEN];
+    char recorded_by[MAX_FIELD_LEN];
+    char created_at[MAX_FIELD_LEN];
+} Payment;
+
+typedef struct {
     Payment *payments;
     int count;
     int capacity;

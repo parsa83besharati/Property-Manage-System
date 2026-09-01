@@ -341,24 +341,3 @@ int username_exists(Database *db, const char *username) {
     }
     return 0;
 }
-
-void get_password_hidden(char *buffer, int maxlen) {
-    int i = 0;
-    int ch;
-    while (1) {
-        ch = _getch();
-        if (ch == '\r' || ch == '\n') {
-            break;
-        } else if (ch == '\b' || ch == 127) {
-            if (i > 0) {
-                i--;
-                printf("\b \b");
-            }
-        } else if (i < maxlen - 1 && ch >= 32 && ch <= 126) {
-            buffer[i++] = ch;
-            printf("*");
-        }
-    }
-    buffer[i] = '\0';
-    printf("\n");
-}

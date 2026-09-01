@@ -126,13 +126,6 @@ int export_properties_to_csv(Database *db, const char *filename) {
     return 1;
 }
 
-int export_all_to_csv(Database *db, const char *users_file, const char *properties_file) {
-    if (!db || !users_file || !properties_file) return 0;
-    if (!export_users_to_csv(db, users_file)) return 0;
-    if (!export_properties_to_csv(db, properties_file)) return 0;
-    return 1;
-}
-
 // =============================================================================
 // LEASE EXPORT FUNCTIONS
 // =============================================================================

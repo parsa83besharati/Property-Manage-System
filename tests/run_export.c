@@ -140,21 +140,29 @@ void test_export_all_csv(void) {
     Property p = create_test_prop("ALL001", 150000);
     db_property_create(db, &p);
     
-    int r = export_all_to_csv(db, "export_users2.csv", "export_props2.csv");
+    int r = export_all_to_csv(db, "export_users2.csv", "export_props2.csv", "export_leases2.csv", "export_payments2.csv");
     printf("export_all_to_csv returned: %d\n", r);
     TEST_ASSERT_EQUAL(1, r);
     
     FILE *fp1 = fopen("export_users2.csv", "r");
     FILE *fp2 = fopen("export_props2.csv", "r");
+    FILE *fp3 = fopen("export_leases2.csv", "r");
+    FILE *fp4 = fopen("export_payments2.csv", "r");
     TEST_ASSERT_NOT_NULL(fp1);
     TEST_ASSERT_NOT_NULL(fp2);
+    TEST_ASSERT_NOT_NULL(fp3);
+    TEST_ASSERT_NOT_NULL(fp4);
     fclose(fp1);
     fclose(fp2);
+    fclose(fp3);
+    fclose(fp4);
     
     database_close(db);
     cleanup_db(db_path);
     remove("export_users2.csv");
     remove("export_props2.csv");
+    remove("export_leases2.csv");
+    remove("export_payments2.csv");
 }
 
 void test_export_empty_db(void) {
