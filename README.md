@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![C Standard](https://img.shields.io/badge/C-C11-yellow.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 
-A console-based property management application written in C, featuring user authentication, property listings (sell/rent), **lease management with payments & renewals**, SQLite database backend, modern terminal UI, comprehensive test suite, configuration management, CSV export/import, audit logging, user roles/permissions, property images, and Docker support.
+A console-based property management application written in C, featuring user authentication, property listings (sell/rent), **lease management with payments & renewals**, **expense tracking with 7 categories**, **rent roll & expense reports**, SQLite database backend, modern terminal UI, comprehensive test suite, configuration management, CSV export/import, audit logging, user roles/permissions, property images, and Docker support.
 
 ## Features
 
@@ -17,13 +17,15 @@ A console-based property management application written in C, featuring user aut
 - **Lease Management**: Complete rental lifecycle with lease creation, termination, payments & renewals
 - **Payment Tracking**: Record rent payments, late fees, due dates with full history per lease
 - **Auto-Renewal Workflow**: Batch processing of expiring leases with auto-renewal logic
+- **Expense Tracking**: 7 expense categories (Mortgage, Insurance, Utilities, HOA, Maintenance, Tax, Other) with full CRUD
+- **Financial Reports**: Rent roll report, expense report by type, property portfolio summary
 - **Advanced Search & Reports**: Filter by district, location, price range, property type with pagination
 - **Admin Panel**: View all users, manage all properties, system statistics
 - **Profile Management**: Edit personal info, change password
 - **Modern Terminal UI**: Color-coded styles, box drawing, forms with validation, spinners, progress bars, tables
 - **SQLite Database**: WAL mode, foreign keys, migrations from flat files
 - **Configuration Management**: INI-style config file for paths, limits, UI settings
-- **CSV Export/Import**: Export/import users, properties, leases, payments with validation
+- **CSV Export/Import**: Export/import users, properties, leases, payments, expenses with validation
 - **Audit Logging**: Track all CRUD operations, login/logout, exports/imports with filtering and pagination
 - **Docker Support**: Multi-stage Dockerfile for containerized deployment
 - **Comprehensive Test Suite**: 100+ unit tests following SDET best practices
@@ -104,8 +106,10 @@ make clean
 2. **Delete Property** - Remove your own property listings
 3. **Search Properties** - Advanced search with filters + pagination
 4. **Lease Management** - Create leases, record payments, manage renewals
-5. **User Settings** - Edit profile, change password
-6. **Logout** - Return to entry menu
+5. **Expense Management** - Add expenses, view expenses, view summary by type
+6. **Reports** - Generate rent roll, expense report, property summary
+7. **User Settings** - Edit profile, change password
+8. **Logout** - Return to entry menu
 
 ### Lease Management Menu
 1. **Create Lease** - Select property → tenant → dates → rent/deposit → payment day → auto-renew
@@ -160,17 +164,24 @@ db_payment_create(db, &p);
 db_lease_process_renewals(db, 30); // Renew leases expiring within 30 days
 ```
 
-### Audit Logging
-All operations are automatically logged (including imports). Query logs with:
+### Expense Management API
 ```c
-audit_get_logs(db, "username", AUDIT_CREATE, AUDIT_ENTITY_PROPERTY, "PROP001", 10, 0, &logs, &count);
+// Record expense
+Expense expense = { .property_code="PROP001", .type=EXPENSE_TYPE_MORTGAGE,
+                    .amount=1500.0, .date="2026-01-15",
+                    .description="Monthly mortgage", .vendor="Bank ABC" };
+db_expense_create(db, &expense);
+
+// Get expense summary by type
+double mortgage_total = db_expense_sum_by_type(db, EXPENSE_TYPE_MORTGAGE);
+
+// Generate reports
+generate_rent_roll_report(db, "rent_roll.csv");
+generate_expense_report(db, "expense_report.txt");
+generate_property_summary_report(db, "property_summary.txt");
 ```
 
 ### Audit Logging
-All operations are automatically logged (including imports). Query logs with:
-```c
-audit_get_logs(db, "username", AUDIT_CREATE, AUDIT_ENTITY_PROPERTY, "PROP001", 10, 0, &logs, &count);
-```
 
 ## Project Structure
 
@@ -188,7 +199,8 @@ Property-Manage-System/
 │   │   ├── ui.h               # Terminal UI components
 │   │   ├── config.h           # Configuration API
 │   │   ├── export.h           # CSV export API
-│   │   └── audit.h            # Audit logging API
+│   │   ├── audit.h            # Audit logging API
+│   │   └── reports.h          # Reports API
 │   ├── utils/                 # Utility implementations
 │   │   ├── common.c           # Input validation, string utils, date/time
 │   │   ├── sha256.c           # SHA-256 implementation
@@ -196,11 +208,12 @@ Property-Manage-System/
 │   │   ├── sqlite3.c          # SQLite amalgamation
 │   │   ├── config.c           # INI config parser
 │   │   ├── export.c           # CSV export
-│   │   └── audit.c            # Audit logging
+│   │   ├── audit.c            # Audit logging
+│   │   └── reports.c          # Report generation
 │   └── modules/               # Core business logic
 │       ├── user.c             # Registration, login, profile management
 │       ├── property.c         # Property input/validation
-│       ├── menu.c             # Menu navigation, search, admin, leases
+│       ├── menu.c             # Menu navigation, search, admin, leases, expenses, reports
 │       └── database.c         # SQLite CRUD, migrations, audit init
 ├── tests/                      # Unit test suite (58 core tests passing)
 │   ├── run_sha256.c           # SHA256 hash tests (3)
@@ -249,6 +262,7 @@ Property-Manage-System/
 | User Roles/Permissions | 2 | Source ready* |
 | Property Images | 3 | Source ready* |
 | CSV Import | 4 | Source ready* |
+| Expense Tracking | 15 | Source ready* |
 
 *Note: Additional test files created but require UI dependency resolution for compilation. Core 58 tests verify all database functions.
 
@@ -281,8 +295,9 @@ Property-Manage-System/
 - **properties** table: code (PK), district, address, location, ptype, action, subtype, ..., **image_path**, active, created_at
 - **leases** table: id (PK), property_code (FK), tenant_username (FK), start_date, end_date, monthly_rent, deposit, payment_day, status, auto_renew, created_at
 - **payments** table: id (PK), lease_id (FK), amount, payment_date, due_date, is_late, late_fee, notes, recorded_by, created_at
+- **expenses** table: id (PK), property_code (FK), type, amount, date, description, vendor, created_at
 - **audit_log** table: id (PK), timestamp, username, action, entity, entity_id, details
-- Foreign keys: properties.username → users.username, leases.property_code → properties.code, leases.tenant_username → users.username, payments.lease_id → leases.id
+- Foreign keys: properties.username → users.username, leases.property_code → properties.code, leases.tenant_username → users.username, payments.lease_id → leases.id, expenses.property_code → properties.code
 
 ### Legacy Flat Files (migrated)
 - `users.dat` - Pipe-delimited user records
