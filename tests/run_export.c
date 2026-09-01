@@ -188,11 +188,176 @@ void test_export_empty_db(void) {
     remove("export_empty_users.csv");
 }
 
+// =============================================================================
+// CSV IMPORT TESTS
+// =============================================================================
+
+void test_import_users_csv(void) {
+    char db_path[100];
+    sprintf(db_path, "test_import_users_%d.db", rand());
+    Database *db = open_test_db(db_path);
+    TEST_ASSERT_NOT_NULL(db);
+    
+    // Create a test CSV file
+    FILE *fp = fopen("import_users.csv", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "username,first_name,last_name,id,phone,email,created_at\n");
+    fprintf(fp, "importuser1,Import,One,1111111111,09111111111,import1@test.com,2026-01-01\n");
+    fprintf(fp, "importuser2,Import,Two,2222222222,09222222222,import2@test.com,2026-01-02\n");
+    fclose(fp);
+    
+    int imported = 0, skipped = 0;
+    int r = import_users_from_csv(db, "import_users.csv", &imported, &skipped);
+    TEST_ASSERT_EQUAL(1, r);
+    TEST_ASSERT_EQUAL_INT(2, imported);
+    TEST_ASSERT_EQUAL_INT(0, skipped);
+    
+    // Verify users were imported
+    User *u1 = db_user_find_by_username(db, "importuser1");
+    TEST_ASSERT_NOT_NULL(u1);
+    TEST_ASSERT_EQUAL_STRING("Import", u1->first_name);
+    TEST_ASSERT_EQUAL_STRING("One", u1->last_name);
+    TEST_ASSERT_EQUAL_STRING("1111111111", u1->id);
+    free(u1);
+    
+    User *u2 = db_user_find_by_username(db, "importuser2");
+    TEST_ASSERT_NOT_NULL(u2);
+    TEST_ASSERT_EQUAL_STRING("Import", u2->first_name);
+    TEST_ASSERT_EQUAL_STRING("Two", u2->last_name);
+    TEST_ASSERT_EQUAL_STRING("2222222222", u2->id);
+    free(u2);
+    
+    // Test importing duplicate (should skip)
+    r = import_users_from_csv(db, "import_users.csv", &imported, &skipped);
+    TEST_ASSERT_EQUAL(1, r);
+    TEST_ASSERT_EQUAL_INT(2, imported); // Still 2, no new ones
+    TEST_ASSERT_EQUAL_INT(2, skipped);  // Both skipped
+    
+    database_close(db);
+    cleanup_db(db_path);
+    remove("import_users.csv");
+}
+
+void test_import_properties_csv(void) {
+    char db_path[100];
+    sprintf(db_path, "test_import_props_%d.db", rand());
+    Database *db = open_test_db(db_path);
+    TEST_ASSERT_NOT_NULL(db);
+    
+    // Need testuser for foreign key
+    User *testuser = db_user_find_by_username(db, "testuser");
+    TEST_ASSERT_NOT_NULL(testuser);
+    free(testuser);
+    
+    // Create a test CSV file with properties for testuser
+    FILE *fp = fopen("import_props.csv", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "code,district,address,location,type,action,subtype,build_age,floor_area,floor,land_area,owner_phone,bedrooms,rooms,tax_rate,elevator,basement,basement_area,balcony,balcony_area,parkings,phones,temperature,sell_price,base_price,monthly_price,date,image_path,username,active\n");
+    fprintf(fp, "IMP001,1,Import Address 1,North,Residential,Sell,Apartment,5,100,2,0,09111111111,2,3,1.5,Yes,No,0,No,0,1,2,Cold,200000,180000,2000,2026-01-15,,testuser,1\n");
+    fprintf(fp, "IMP002,2,Import Address 2,South,Commercial,Rent,Official,10,200,5,0,09222222222,0,10,2.0,Yes,Yes,50,Yes,20,5,5,Hot,0,150000,1500,2026-02-15,,testuser,1\n");
+    fclose(fp);
+    
+    int imported = 0, skipped = 0;
+    int r = import_properties_from_csv(db, "import_props.csv", &imported, &skipped);
+    TEST_ASSERT_EQUAL(1, r);
+    TEST_ASSERT_EQUAL_INT(2, imported);
+    TEST_ASSERT_EQUAL_INT(0, skipped);
+    
+    // Verify properties were imported
+    Property *p1 = db_property_find_by_code(db, "IMP001");
+    TEST_ASSERT_NOT_NULL(p1);
+    TEST_ASSERT_EQUAL_INT(1, p1->district);
+    TEST_ASSERT_EQUAL_STRING("Import Address 1", p1->address);
+    TEST_ASSERT_EQUAL(PROP_TYPE_RESIDENTIAL, p1->ptype);
+    TEST_ASSERT_EQUAL(PROP_ACTION_SELL, p1->action);
+    TEST_ASSERT_EQUAL(RES_TYPE_APARTMENT, p1->subtype.res_type);
+    TEST_ASSERT_EQUAL_DOUBLE(200000.0, p1->sell_price);
+    TEST_ASSERT_EQUAL_STRING("testuser", p1->username);
+    free(p1);
+    
+    Property *p2 = db_property_find_by_code(db, "IMP002");
+    TEST_ASSERT_NOT_NULL(p2);
+    TEST_ASSERT_EQUAL_INT(2, p2->district);
+    TEST_ASSERT_EQUAL(PROP_TYPE_COMMERCIAL, p2->ptype);
+    TEST_ASSERT_EQUAL(PROP_ACTION_RENT, p2->action);
+    TEST_ASSERT_EQUAL(COM_TYPE_OFFICIAL, p2->subtype.com_type);
+    TEST_ASSERT_EQUAL_DOUBLE(0.0, p2->sell_price); // Rent property
+    TEST_ASSERT_EQUAL_DOUBLE(1500.0, p2->monthly_price);
+    free(p2);
+    
+    // Test importing duplicate (should skip)
+    r = import_properties_from_csv(db, "import_props.csv", &imported, &skipped);
+    TEST_ASSERT_EQUAL(1, r);
+    TEST_ASSERT_EQUAL_INT(2, imported); // Still 2
+    TEST_ASSERT_EQUAL_INT(2, skipped);  // Both skipped
+    
+    // Test importing with non-existent user (should skip)
+    FILE *fp2 = fopen("import_props_bad.csv", "w");
+    TEST_ASSERT_NOT_NULL(fp2);
+    fprintf(fp2, "code,district,address,location,type,action,subtype,build_age,floor_area,floor,land_area,owner_phone,bedrooms,rooms,tax_rate,elevator,basement,basement_area,balcony,balcony_area,parkings,phones,temperature,sell_price,base_price,monthly_price,date,image_path,username,active\n");
+    fprintf(fp2, "IMP003,1,Bad User Prop,North,Residential,Sell,Apartment,5,100,2,0,09111111111,2,3,1.5,Yes,No,0,No,0,1,2,Cold,200000,180000,2000,2026-01-15,,nonexistent,1\n");
+    fclose(fp2);
+    
+    imported = 0; skipped = 0;
+    r = import_properties_from_csv(db, "import_props_bad.csv", &imported, &skipped);
+    TEST_ASSERT_EQUAL(1, r);
+    TEST_ASSERT_EQUAL_INT(0, imported);
+    TEST_ASSERT_EQUAL_INT(1, skipped); // Skipped due to missing user
+    
+    database_close(db);
+    cleanup_db(db_path);
+    remove("import_props.csv");
+    remove("import_props_bad.csv");
+}
+
+void test_import_users_csv_with_missing_fields(void) {
+    char db_path[100];
+    sprintf(db_path, "test_import_users_bad_%d.db", rand());
+    Database *db = open_test_db(db_path);
+    TEST_ASSERT_NOT_NULL(db);
+    
+    // Create CSV with missing fields
+    FILE *fp = fopen("import_users_bad.csv", "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "username,first_name,last_name,id,phone,email,created_at\n");
+    fprintf(fp, "baduser1,,MissingLast,1111111111,09111111111,missing@test.com,2026-01-01\n");
+    fprintf(fp, "baduser2,HasFirst,,2222222222,09222222222,missing2@test.com,2026-01-02\n");
+    fprintf(fp, "baduser3,HasFirst,HasLast,3333333333,,hasphone@test.com,2026-01-03\n");
+    fclose(fp);
+    
+    int imported = 0, skipped = 0;
+    int r = import_users_from_csv(db, "import_users_bad.csv", &imported, &skipped);
+    TEST_ASSERT_EQUAL(1, r);
+    // Should import what it can (all 3 have username)
+    TEST_ASSERT_EQUAL_INT(3, imported);
+    TEST_ASSERT_EQUAL_INT(0, skipped);
+    
+    // Verify partial data
+    User *u1 = db_user_find_by_username(db, "baduser1");
+    TEST_ASSERT_NOT_NULL(u1);
+    TEST_ASSERT_EQUAL_STRING("", u1->first_name);
+    TEST_ASSERT_EQUAL_STRING("MissingLast", u1->last_name);
+    free(u1);
+    
+    User *u2 = db_user_find_by_username(db, "baduser2");
+    TEST_ASSERT_NOT_NULL(u2);
+    TEST_ASSERT_EQUAL_STRING("HasFirst", u2->first_name);
+    TEST_ASSERT_EQUAL_STRING("", u2->last_name);
+    free(u2);
+    
+    database_close(db);
+    cleanup_db(db_path);
+    remove("import_users_bad.csv");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_export_users_csv);
     RUN_TEST(test_export_properties_csv);
     RUN_TEST(test_export_all_csv);
     RUN_TEST(test_export_empty_db);
+    RUN_TEST(test_import_users_csv);
+    RUN_TEST(test_import_properties_csv);
+    RUN_TEST(test_import_users_csv_with_missing_fields);
     return UNITY_END();
 }

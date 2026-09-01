@@ -106,9 +106,15 @@ typedef struct {
     double base_price;
     double monthly_price;
     char date[MAX_FIELD_LEN];
+    char image_path[MAX_STRING_LEN];
     char username[MAX_FIELD_LEN];
     bool active;
 } Property;
+
+typedef enum {
+    ROLE_USER = 0,
+    ROLE_ADMIN = 1
+} UserRole;
 
 typedef struct {
     char username[MAX_FIELD_LEN];
@@ -119,6 +125,7 @@ typedef struct {
     char email[MAX_FIELD_LEN];
     char password_hash[SHA256_DIGEST_LENGTH * 2 + 1];
     char salt[SALT_LENGTH + 1];
+    UserRole role;
 } User;
 
 typedef struct {

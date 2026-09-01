@@ -276,3 +276,61 @@ void test_property_empty_database(void) {
     database_close(db);
     remove("data/test_prop_empty.db");
 }
+
+// =============================================================================
+// IMAGE PATH
+// =============================================================================
+void test_property_image_path_empty_by_default(void) {
+    Database *db = database_open("data/test_prop_img_empty.db");
+    TEST_ASSERT_NOT_NULL(db);
+    TEST_ASSERT_TRUE(database_init_schema(db));
+
+    Property prop = create_test_property("IMG001", 1, PROP_TYPE_RESIDENTIAL, PROP_ACTION_SELL, 100000.0);
+    // Don't set image_path - should default to empty
+    db_property_create(db, &prop);
+
+    Property *found = db_property_find_by_code(db, "IMG001");
+    TEST_ASSERT_NOT_NULL(found);
+    TEST_ASSERT_EQUAL_STRING("", found->image_path);
+
+    database_close(db);
+    remove("data/test_prop_img_empty.db");
+}
+
+void test_property_image_path_set_and_get(void) {
+    Database *db = database_open("data/test_prop_img_set.db");
+    TEST_ASSERT_NOT_NULL(db);
+    TEST_ASSERT_TRUE(database_init_schema(db));
+
+    Property prop = create_test_property("IMG002", 1, PROP_TYPE_RESIDENTIAL, PROP_ACTION_SELL, 200000.0);
+    strcpy(prop.image_path, "/images/property1.jpg");
+    db_property_create(db, &prop);
+
+    Property *found = db_property_find_by_code(db, "IMG002");
+    TEST_ASSERT_NOT_NULL(found);
+    TEST_ASSERT_EQUAL_STRING("/images/property1.jpg", found->image_path);
+
+    database_close(db);
+    remove("data/test_prop_img_set.db");
+}
+
+void test_property_image_path_long_path(void) {
+    Database *db = database_open("data/test_prop_img_long.db");
+    TEST_ASSERT_NOT_NULL(db);
+    TEST_ASSERT_TRUE(database_init_schema(db));
+
+    Property prop = create_test_property("IMG003", 1, PROP_TYPE_RESIDENTIAL, PROP_ACTION_SELL, 300000.0);
+    // Test with a long path (near MAX_STRING_LEN)
+    char long_path[MAX_STRING_LEN];
+    memset(long_path, 'a', MAX_STRING_LEN - 1);
+    long_path[MAX_STRING_LEN - 1] = '\0';
+    strcpy(prop.image_path, long_path);
+    db_property_create(db, &prop);
+
+    Property *found = db_property_find_by_code(db, "IMG003");
+    TEST_ASSERT_NOT_NULL(found);
+    TEST_ASSERT_EQUAL_STRING(long_path, found->image_path);
+
+    database_close(db);
+    remove("data/test_prop_img_long.db");
+}

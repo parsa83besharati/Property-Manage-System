@@ -82,7 +82,7 @@ int export_properties_to_csv(Database *db, const char *filename) {
         return 0;
     }
     
-    fprintf(fp, "code,district,address,location,type,action,subtype,build_age,floor_area,floor,land_area,owner_phone,bedrooms,rooms,tax_rate,elevator,basement,basement_area,balcony,balcony_area,parkings,phones,temperature,sell_price,base_price,monthly_price,date,username,active\n");
+    fprintf(fp, "code,district,address,location,type,action,subtype,build_age,floor_area,floor,land_area,owner_phone,bedrooms,rooms,tax_rate,elevator,basement,basement_area,balcony,balcony_area,parkings,phones,temperature,sell_price,base_price,monthly_price,date,image_path,username,active\n");
     
     const char *ptype_str[] = {"Residential", "Commercial", "Land"};
     const char *action_str[] = {"Sell", "Rent"};
@@ -95,7 +95,7 @@ int export_properties_to_csv(Database *db, const char *filename) {
     
     for (int i = 0; i < count; i++) {
         Property *p = &props[i];
-        char esc_code[64], esc_addr[512], esc_phone[64], esc_date[64], esc_user[64];
+        char esc_code[64], esc_addr[512], esc_phone[64], esc_date[64], esc_user[64], esc_image[512];
         char esc_addr_escaped[512];
         
         escape_csv(esc_code, p->code, sizeof(esc_code));
@@ -103,13 +103,14 @@ int export_properties_to_csv(Database *db, const char *filename) {
         escape_csv(esc_phone, p->owner_phone, sizeof(esc_phone));
         escape_csv(esc_date, p->date, sizeof(esc_date));
         escape_csv(esc_user, p->username, sizeof(esc_user));
+        escape_csv(esc_image, p->image_path, sizeof(esc_image));
         
         const char *subtype = "";
         if (p->ptype == 0) subtype = res_sub[p->subtype.res_type];
         else if (p->ptype == 1) subtype = com_sub[p->subtype.com_type];
         else if (p->ptype == 2) subtype = land_sub[p->subtype.land_type];
         
-        fprintf(fp, "%s,%d,%s,%s,%s,%s,%s,%d,%.2f,%d,%.2f,%s,%d,%d,%.2f,%d,%d,%.2f,%d,%.2f,%d,%d,%d,%.2f,%.2f,%.2f,%s,%s,%d\n",
+        fprintf(fp, "%s,%d,%s,%s,%s,%s,%s,%d,%.2f,%d,%.2f,%s,%d,%d,%.2f,%d,%d,%.2f,%d,%.2f,%d,%d,%d,%.2f,%.2f,%.2f,%s,%s,%s,%d\n",
                 esc_code, p->district, esc_addr_escaped, loc_str[p->location],
                 ptype_str[p->ptype], action_str[p->action], subtype,
                 p->build_age, p->floor_area, p->floor, p->land_area,
@@ -117,7 +118,7 @@ int export_properties_to_csv(Database *db, const char *filename) {
                 p->elevator, p->basement, p->basement_area,
                 p->balcony, p->balcony_area, p->parkings, p->phones,
                 p->temperature, p->sell_price, p->base_price, p->monthly_price,
-                esc_date, esc_user, p->active);
+                esc_date, esc_image, esc_user, p->active);
     }
     
     fclose(fp);
@@ -129,5 +130,318 @@ int export_all_to_csv(Database *db, const char *users_file, const char *properti
     if (!db || !users_file || !properties_file) return 0;
     if (!export_users_to_csv(db, users_file)) return 0;
     if (!export_properties_to_csv(db, properties_file)) return 0;
+    return 1;
+}
+
+// =============================================================================
+// CSV PARSING HELPERS
+// =============================================================================
+
+// Parse a single CSV line into fields, handling quoted fields
+static int parse_csv_line(const char *line, char fields[][MAX_STRING_LEN], int max_fields) {
+    int field_count = 0;
+    const char *p = line;
+    char *dest = fields[0];
+    int in_quotes = 0;
+    
+    while (*p && field_count < max_fields) {
+        if (*p == '"') {
+            if (in_quotes && *(p + 1) == '"') {
+                // Escaped quote
+                *dest++ = '"';
+                p += 2;
+            } else {
+                // Toggle quote state
+                in_quotes = !in_quotes;
+                p++;
+            }
+        } else if (*p == ',' && !in_quotes) {
+            // End of field
+            *dest = '\0';
+            field_count++;
+            if (field_count < max_fields) {
+                dest = fields[field_count];
+            }
+            p++;
+        } else if ((*p == '\n' || *p == '\r') && !in_quotes) {
+            // End of line
+            *dest = '\0';
+            field_count++;
+            break;
+        } else {
+            *dest++ = *p++;
+        }
+    }
+    
+    if (field_count < max_fields && dest != fields[field_count]) {
+        *dest = '\0';
+        field_count++;
+    }
+    
+    return field_count;
+}
+
+// Trim whitespace from both ends of string
+static void trim_string(char *str) {
+    if (!str) return;
+    
+    // Trim leading whitespace
+    char *start = str;
+    while (*start && (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n')) {
+        start++;
+    }
+    
+    // Trim trailing whitespace
+    char *end = start + strlen(start) - 1;
+    while (end > start && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) {
+        *end-- = '\0';
+    }
+    
+    // Move trimmed string to start
+    if (start != str) {
+        memmove(str, start, strlen(start) + 1);
+    }
+}
+
+// Parse property type string to enum
+static PropertyType parse_property_type(const char *str) {
+    if (strcasecmp(str, "Residential") == 0) return PROP_TYPE_RESIDENTIAL;
+    if (strcasecmp(str, "Commercial") == 0) return PROP_TYPE_COMMERCIAL;
+    if (strcasecmp(str, "Land") == 0) return PROP_TYPE_LAND;
+    return PROP_TYPE_RESIDENTIAL; // default
+}
+
+// Parse action string to enum
+static PropertyAction parse_action(const char *str) {
+    if (strcasecmp(str, "Sell") == 0) return PROP_ACTION_SELL;
+    if (strcasecmp(str, "Rent") == 0) return PROP_ACTION_RENT;
+    return PROP_ACTION_SELL; // default
+}
+
+// Parse location string to enum
+static Location parse_location(const char *str) {
+    if (strcasecmp(str, "North") == 0) return LOCATION_NORTH;
+    if (strcasecmp(str, "South") == 0) return LOCATION_SOUTH;
+    if (strcasecmp(str, "East") == 0) return LOCATION_EAST;
+    if (strcasecmp(str, "West") == 0) return LOCATION_WEST;
+    return LOCATION_NORTH; // default
+}
+
+// Parse subtype string based on property type
+static void parse_subtype(Property *prop, const char *str) {
+    if (prop->ptype == PROP_TYPE_RESIDENTIAL) {
+        if (strcasecmp(str, "Apartment") == 0) prop->subtype.res_type = RES_TYPE_APARTMENT;
+        else if (strcasecmp(str, "Villa") == 0) prop->subtype.res_type = RES_TYPE_VILLA;
+        else prop->subtype.res_type = RES_TYPE_APARTMENT;
+    } else if (prop->ptype == PROP_TYPE_COMMERCIAL) {
+        if (strcasecmp(str, "Official") == 0) prop->subtype.com_type = COM_TYPE_OFFICIAL;
+        else if (strcasecmp(str, "Position") == 0) prop->subtype.com_type = COM_TYPE_POSITION;
+        else prop->subtype.com_type = COM_TYPE_OFFICIAL;
+    } else if (prop->ptype == PROP_TYPE_LAND) {
+        if (strcasecmp(str, "Farm") == 0) prop->subtype.land_type = LAND_TYPE_FARM;
+        else if (strcasecmp(str, "City") == 0) prop->subtype.land_type = LAND_TYPE_CITY;
+        else prop->subtype.land_type = LAND_TYPE_FARM;
+    }
+}
+
+// Parse Yes/No to int
+static int parse_yes_no(const char *str) {
+    if (strcasecmp(str, "Yes") == 0) return 1;
+    if (strcasecmp(str, "No") == 0) return 0;
+    return atoi(str); // fallback to numeric
+}
+
+// Parse temperature string to enum
+static Temperature parse_temperature(const char *str) {
+    if (strcasecmp(str, "Cold") == 0) return TEMP_COLD;
+    if (strcasecmp(str, "Hot") == 0) return TEMP_HOT;
+    if (strcasecmp(str, "Medium") == 0) return TEMP_MEDIUM;
+    return TEMP_MEDIUM;
+}
+
+// =============================================================================
+// CSV IMPORT FUNCTIONS
+// =============================================================================
+
+int import_users_from_csv(Database *db, const char *filename, int *imported, int *skipped) {
+    if (!db || !filename) return 0;
+    
+    FILE *fp = fopen(filename, "r");
+    if (!fp) return 0;
+    
+    if (imported) *imported = 0;
+    if (skipped) *skipped = 0;
+    
+    char line[4096];
+    char fields[8][MAX_STRING_LEN];
+    int line_num = 0;
+    int first_line = 1;
+    
+    // Generate salt for new users
+    char salt[SALT_LENGTH + 1];
+    // We'll use a simple default password hash for imported users
+    const char *default_hash = "imported_password_hash_placeholder";
+    
+    while (fgets(line, sizeof(line), fp)) {
+        line_num++;
+        
+        // Skip header line
+        if (first_line) {
+            first_line = 0;
+            continue;
+        }
+        
+        // Skip empty lines
+        if (strlen(line) < 3) continue;
+        
+        int field_count = parse_csv_line(line, fields, 8);
+        if (field_count < 6) {
+            if (skipped) (*skipped)++;
+            continue;
+        }
+        
+        trim_string(fields[0]); // username
+        trim_string(fields[1]); // first_name
+        trim_string(fields[2]); // last_name
+        trim_string(fields[3]); // id
+        trim_string(fields[4]); // phone
+        trim_string(fields[5]); // email
+        
+        // Check if user already exists
+        if (db_user_find_by_username(db, fields[0])) {
+            if (skipped) (*skipped)++;
+            continue;
+        }
+        
+        // Create user
+        User user;
+        memset(&user, 0, sizeof(User));
+        strncpy(user.username, fields[0], MAX_FIELD_LEN - 1);
+        strncpy(user.first_name, fields[1], MAX_FIELD_LEN - 1);
+        strncpy(user.last_name, fields[2], MAX_FIELD_LEN - 1);
+        strncpy(user.id, fields[3], MAX_FIELD_LEN - 1);
+        strncpy(user.phone, fields[4], MAX_FIELD_LEN - 1);
+        strncpy(user.email, fields[5], MAX_FIELD_LEN - 1);
+        strncpy(user.password_hash, default_hash, SHA256_DIGEST_LENGTH * 2);
+        strncpy(user.salt, "imported_salt_1234", SALT_LENGTH);
+        user.role = ROLE_USER;
+        
+        if (db_user_create(db, &user)) {
+            if (imported) (*imported)++;
+        } else {
+            if (skipped) (*skipped)++;
+        }
+    }
+    
+    fclose(fp);
+    return 1;
+}
+
+int import_properties_from_csv(Database *db, const char *filename, int *imported, int *skipped) {
+    if (!db || !filename) return 0;
+    
+    FILE *fp = fopen(filename, "r");
+    if (!fp) return 0;
+    
+    if (imported) *imported = 0;
+    if (skipped) *skipped = 0;
+    
+    char line[8192];
+    char fields[30][MAX_STRING_LEN];
+    int first_line = 1;
+    
+    while (fgets(line, sizeof(line), fp)) {
+        // Skip header line
+        if (first_line) {
+            first_line = 0;
+            continue;
+        }
+        
+        // Skip empty lines
+        if (strlen(line) < 3) continue;
+        
+        int field_count = parse_csv_line(line, fields, 30);
+        if (field_count < 29) {
+            if (skipped) (*skipped)++;
+            continue;
+        }
+        
+        // Trim all fields
+        for (int i = 0; i < field_count; i++) {
+            trim_string(fields[i]);
+        }
+        
+        // Fields: code,district,address,location,type,action,subtype,build_age,floor_area,floor,
+        // land_area,owner_phone,bedrooms,rooms,tax_rate,elevator,basement,basement_area,
+        // balcony,balcony_area,parkings,phones,temperature,sell_price,base_price,monthly_price,
+        // date,image_path,username,active
+        
+        const char *code = fields[0];
+        if (!code || strlen(code) == 0) {
+            if (skipped) (*skipped)++;
+            continue;
+        }
+        
+        // Check if property already exists
+        if (db_property_find_by_code(db, code)) {
+            if (skipped) (*skipped)++;
+            continue;
+        }
+        
+        // Check if user exists
+        const char *username = fields[28];
+        if (!username || strlen(username) == 0) {
+            if (skipped) (*skipped)++;
+            continue;
+        }
+        
+        if (!db_user_find_by_username(db, username)) {
+            if (skipped) (*skipped)++;
+            continue;
+        }
+        
+        // Create property
+        Property prop;
+        memset(&prop, 0, sizeof(Property));
+        
+        strncpy(prop.code, code, MAX_FIELD_LEN - 1);
+        prop.district = atoi(fields[1]);
+        strncpy(prop.address, fields[2], MAX_STRING_LEN - 1);
+        prop.location = parse_location(fields[3]);
+        prop.ptype = parse_property_type(fields[4]);
+        prop.action = parse_action(fields[5]);
+        parse_subtype(&prop, fields[6]);
+        prop.build_age = atoi(fields[7]);
+        prop.floor_area = atof(fields[8]);
+        prop.floor = atoi(fields[9]);
+        prop.land_area = atof(fields[10]);
+        strncpy(prop.owner_phone, fields[11], MAX_FIELD_LEN - 1);
+        prop.bedrooms = atoi(fields[12]);
+        prop.rooms = atoi(fields[13]);
+        prop.tax_rate = atof(fields[14]);
+        prop.elevator = parse_yes_no(fields[15]);
+        prop.basement = parse_yes_no(fields[16]);
+        prop.basement_area = atof(fields[17]);
+        prop.balcony = parse_yes_no(fields[18]);
+        prop.balcony_area = atof(fields[19]);
+        prop.parkings = atoi(fields[20]);
+        prop.phones = atoi(fields[21]);
+        prop.temperature = parse_temperature(fields[22]);
+        prop.sell_price = atof(fields[23]);
+        prop.base_price = atof(fields[24]);
+        prop.monthly_price = atof(fields[25]);
+        strncpy(prop.date, fields[26], MAX_FIELD_LEN - 1);
+        strncpy(prop.image_path, fields[27], MAX_STRING_LEN - 1);
+        strncpy(prop.username, username, MAX_FIELD_LEN - 1);
+        prop.active = atoi(fields[29]);
+        
+        if (db_property_create(db, &prop)) {
+            if (imported) (*imported)++;
+        } else {
+            if (skipped) (*skipped)++;
+        }
+    }
+    
+    fclose(fp);
     return 1;
 }

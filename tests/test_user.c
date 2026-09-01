@@ -2,6 +2,7 @@
 #include "database.h"
 #include "sha256.h"
 #include "common.h"
+#include "user.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -237,4 +238,77 @@ void test_user_empty_database(void) {
 
     database_close(db);
     remove("data/test_user_empty.db");
+}
+
+void test_user_set_get_role(void) {
+    Database *db = database_open("data/test_user_role.db");
+    TEST_ASSERT_NOT_NULL(db);
+    TEST_ASSERT_TRUE(database_init_schema(db));
+
+    // Test default role is ROLE_USER
+    User user;
+    memset(&user, 0, sizeof(User));
+    strcpy(user.username, "roleuser");
+    strcpy(user.first_name, "Role");
+    strcpy(user.last_name, "Test");
+    strcpy(user.id, "1111111111");
+    strcpy(user.phone, "09111111111");
+    strcpy(user.email, "role@example.com");
+    strcpy(user.password_hash, "hash");
+    strcpy(user.salt, "salt");
+    db_user_create(db, &user);
+
+    // Default role should be ROLE_USER (0)
+    UserRole role = db_user_get_role(db, "roleuser");
+    TEST_ASSERT_EQUAL(ROLE_USER, role);
+
+    // Set role to ROLE_ADMIN
+    int set_result = db_user_set_role(db, "roleuser", ROLE_ADMIN);
+    TEST_ASSERT_EQUAL(1, set_result);
+
+    // Verify role was set
+    role = db_user_get_role(db, "roleuser");
+    TEST_ASSERT_EQUAL(ROLE_ADMIN, role);
+
+    // Set back to ROLE_USER
+    set_result = db_user_set_role(db, "roleuser", ROLE_USER);
+    TEST_ASSERT_EQUAL(1, set_result);
+
+    role = db_user_get_role(db, "roleuser");
+    TEST_ASSERT_EQUAL(ROLE_USER, role);
+
+    // Test nonexistent user returns ROLE_USER
+    role = db_user_get_role(db, "nonexistent");
+    TEST_ASSERT_EQUAL(ROLE_USER, role);
+
+    database_close(db);
+    remove("data/test_user_role.db");
+}
+
+void test_user_create_with_role(void) {
+    Database *db = database_open("data/test_user_create_role.db");
+    TEST_ASSERT_NOT_NULL(db);
+    TEST_ASSERT_TRUE(database_init_schema(db));
+
+    User user;
+    memset(&user, 0, sizeof(User));
+    strcpy(user.username, "adminuser");
+    strcpy(user.first_name, "Admin");
+    strcpy(user.last_name, "User");
+    strcpy(user.id, "2222222222");
+    strcpy(user.phone, "09222222222");
+    strcpy(user.email, "admin@example.com");
+    strcpy(user.password_hash, "adminhash");
+    strcpy(user.salt, "adminsalt");
+    user.role = ROLE_ADMIN;  // Set role at creation
+
+    int result = db_user_create(db, &user);
+    TEST_ASSERT_EQUAL(1, result);
+
+    // Verify role was stored
+    UserRole role = db_user_get_role(db, "adminuser");
+    TEST_ASSERT_EQUAL(ROLE_ADMIN, role);
+
+    database_close(db);
+    remove("data/test_user_create_role.db");
 }

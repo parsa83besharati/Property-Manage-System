@@ -20,6 +20,8 @@ int db_user_update_password(Database *db, const char *username, const char *hash
 int db_user_update_field(Database *db, const char *username, int field, const char *value);
 int db_user_list_all(Database *db, User **users, int *count);
 int db_user_count(Database *db);
+int db_user_set_role(Database *db, const char *username, UserRole role);
+UserRole db_user_get_role(Database *db, const char *username);
 
 // Property operations
 int db_property_create(Database *db, const Property *prop);

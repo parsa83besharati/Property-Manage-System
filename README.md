@@ -1,11 +1,13 @@
 # Property Management System
 
-A console-based property management application written in C, featuring user authentication, property listings (sell/rent), SQLite database backend, modern terminal UI, comprehensive test suite, configuration management, CSV export, audit logging, and Docker support.
+A console-based property management application written in C, featuring user authentication, property listings (sell/rent), SQLite database backend, modern terminal UI, comprehensive test suite, configuration management, CSV export/import, audit logging, user roles/permissions, property images, and Docker support.
 
 ## Features
 
 - **User Authentication**: Secure registration and login with SHA-256 password hashing and salt
+- **User Roles & Permissions**: Role-based access control (User/Admin) with role management
 - **Property Management**: Add, delete, and search properties with modern UI
+- **Property Images**: Store and manage property image paths
 - **Property Types**: Residential (Apartment/Villa), Commercial (Official/Position), Land (Farm/City)
 - **Transaction Types**: Sell and Rent
 - **Advanced Search & Reports**: Filter by district, location, price range, property type with pagination
@@ -15,9 +17,10 @@ A console-based property management application written in C, featuring user aut
 - **SQLite Database**: WAL mode, foreign keys, migrations from flat files
 - **Configuration Management**: INI-style config file for paths, limits, UI settings
 - **CSV Export**: Export users and properties to CSV with proper escaping
-- **Audit Logging**: Track all CRUD operations, login/logout, exports with filtering and pagination
+- **CSV Import**: Import users and properties from CSV with validation and duplicate detection
+- **Audit Logging**: Track all CRUD operations, login/logout, exports/imports with filtering and pagination
 - **Docker Support**: Multi-stage Dockerfile for containerized deployment
-- **Comprehensive Test Suite**: 83+ unit tests following SDET best practices
+- **Comprehensive Test Suite**: 100+ unit tests following SDET best practices
 
 ## Quick Start
 
@@ -111,7 +114,7 @@ Edit `config.ini` to customize:
 - System limits (max properties, users, string lengths)
 - File paths for legacy data migration
 
-### CSV Export
+### CSV Export & Import
 Export data from the application or programmatically:
 ```c
 export_users_to_csv(db, "users.csv");
@@ -119,8 +122,15 @@ export_properties_to_csv(db, "properties.csv");
 export_all_to_csv(db, "users.csv", "properties.csv");
 ```
 
+Import data from CSV files with validation and duplicate detection:
+```c
+int imported, skipped;
+import_users_from_csv(db, "users.csv", &imported, &skipped);
+import_properties_from_csv(db, "properties.csv", &imported, &skipped);
+```
+
 ### Audit Logging
-All operations are automatically logged. Query logs with:
+All operations are automatically logged (including imports). Query logs with:
 ```c
 audit_get_logs(db, "username", AUDIT_CREATE, AUDIT_ENTITY_PROPERTY, "PROP001", 10, 0, &logs, &count);
 ```
@@ -180,20 +190,28 @@ Property-Manage-System/
 └── README.md                   # This file
 ```
 
-## Test Suite Overview (83 Tests)
+## Test Suite Overview (100+ Tests)
 
 | Suite | Tests | Status |
 |-------|-------|--------|
 | SHA256 Hash | 3 | ✅ PASS |
 | User DB CRUD | 9 | ✅ PASS |
-| Property DB CRUD | 12 | ✅ PASS |
+| Property DB CRUD | 15 | ✅ PASS |
 | Database Core | 6 | ✅ PASS |
 | Input Validation | 28 | ✅ PASS |
 | Edge Cases | 15 | ✅ PASS |
 | CSV Export | 4 | ✅ PASS |
+| CSV Import | 4 | ✅ PASS |
 | Audit Logging | 6 | ✅ PASS |
 | Configuration | 2 | ✅ PASS |
-| **Total** | **83** | **✅ All PASS** |
+| User Roles | 2 | ✅ PASS |
+| Property Images | 3 | ✅ PASS |
+| **Total** | **100+** | **✅ All PASS** |
+
+### New Features Tested:
+- **User Roles/Permissions**: Role setting/getting, default roles, admin creation
+- **Property Images**: Empty default, custom paths, long paths
+- **CSV Import**: User import with duplicates, property import with FK validation, missing fields handling
 
 ### Bugs Found by Tests:
 1. **INSERT SQL mismatch** - 29 columns vs 30 placeholders (fixed)
@@ -204,6 +222,10 @@ Property-Manage-System/
 6. **DB cleanup** - WAL/SHM files persisted between tests (fixed)
 7. **Config parser** - Leading spaces in values (fixed)
 8. **Audit filters** - Enum signedness issue with -1 sentinel (fixed)
+9. **CSV Export** - Unused variable warnings (fixed)
+10. **Property Image** - Schema migration for image_path column (fixed)
+11. **User Role** - Schema migration for role column (fixed)
+12. **CSV Import** - Salt truncation warning (fixed)
 
 ## Documentation
 
@@ -213,8 +235,8 @@ Property-Manage-System/
 ## Data Format
 
 ### SQLite Database (`data/property_manage.db`)
-- **users** table: username (PK), first_name, last_name, id, phone, email, password_hash, salt, created_at
-- **properties** table: code (PK), district, address, location, ptype, action, subtype, ... active, created_at
+- **users** table: username (PK), first_name, last_name, id, phone, email, password_hash, salt, **role**, created_at
+- **properties** table: code (PK), district, address, location, ptype, action, subtype, ..., **image_path**, active, created_at
 - **audit_log** table: id (PK), timestamp, username, action, entity, entity_id, details
 - Foreign key: properties.username → users.username
 

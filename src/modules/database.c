@@ -16,6 +16,7 @@ static const char *SCHEMA_SQL =
     "    email TEXT NOT NULL,"
     "    password_hash TEXT NOT NULL,"
     "    salt TEXT NOT NULL,"
+    "    role INTEGER DEFAULT 0,"
     "    created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
     ");"
     "CREATE TABLE IF NOT EXISTS properties ("
@@ -46,6 +47,7 @@ static const char *SCHEMA_SQL =
     "    base_price REAL DEFAULT 0,"
     "    monthly_price REAL DEFAULT 0,"
     "    date TEXT NOT NULL,"
+    "    image_path TEXT DEFAULT '',"
     "    username TEXT NOT NULL,"
     "    active INTEGER DEFAULT 1,"
     "    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
@@ -138,8 +140,9 @@ static int bind_property_stmt(sqlite3_stmt *stmt, const Property *prop) {
     sqlite3_bind_double(stmt, 25, prop->base_price);
     sqlite3_bind_double(stmt, 26, prop->monthly_price);
     sqlite3_bind_text(stmt, 27, prop->date, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 28, prop->username, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 29, prop->active);
+    sqlite3_bind_text(stmt, 28, prop->image_path, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 29, prop->username, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 30, prop->active);
     return SQLITE_OK;
 }
 
@@ -152,6 +155,7 @@ static void row_to_user(sqlite3_stmt *stmt, User *user) {
     strncpy(user->email, (const char*)sqlite3_column_text(stmt, 5), MAX_FIELD_LEN - 1);
     strncpy(user->password_hash, (const char*)sqlite3_column_text(stmt, 6), SHA256_DIGEST_LENGTH * 2);
     strncpy(user->salt, (const char*)sqlite3_column_text(stmt, 7), SALT_LENGTH);
+    user->role = (UserRole)sqlite3_column_int(stmt, 8);
 }
 
 static void row_to_property(sqlite3_stmt *stmt, Property *prop) {
@@ -182,8 +186,9 @@ static void row_to_property(sqlite3_stmt *stmt, Property *prop) {
     prop->base_price = sqlite3_column_double(stmt, 24);
     prop->monthly_price = sqlite3_column_double(stmt, 25);
     strncpy(prop->date, (const char*)sqlite3_column_text(stmt, 26), MAX_FIELD_LEN - 1);
-    strncpy(prop->username, (const char*)sqlite3_column_text(stmt, 27), MAX_FIELD_LEN - 1);
-    prop->active = sqlite3_column_int(stmt, 28);
+    strncpy(prop->image_path, (const char*)sqlite3_column_text(stmt, 27), MAX_STRING_LEN - 1);
+    strncpy(prop->username, (const char*)sqlite3_column_text(stmt, 28), MAX_FIELD_LEN - 1);
+    prop->active = sqlite3_column_int(stmt, 29);
 }
 
 int db_user_create(Database *db, const User *user) {
@@ -291,6 +296,38 @@ int db_user_count(Database *db) {
     }
     sqlite3_finalize(stmt);
     return count;
+}
+
+int db_user_set_role(Database *db, const char *username, UserRole role) {
+    if (!db || !username) return 0;
+    const char *sql = "UPDATE users SET role = ? WHERE username = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, (int)role);
+    sqlite3_bind_text(stmt, 2, username, -1, SQLITE_STATIC);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
+}
+
+UserRole db_user_get_role(Database *db, const char *username) {
+    if (!db || !username) return ROLE_USER;
+    const char *sql = "SELECT role FROM users WHERE username = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return ROLE_USER;
+    
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    
+    UserRole role = ROLE_USER;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        role = (UserRole)sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return role;
 }
 
 int db_property_create(Database *db, const Property *prop) {
