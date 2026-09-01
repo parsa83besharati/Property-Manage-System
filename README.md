@@ -1,6 +1,5 @@
 # Property Management System
 
-[![CI/CD Pipeline](https://github.com/parsa83besharati/Property-Manage-System/actions/workflows/ci.yml/badge.svg)](https://github.com/parsa83besharati/Property-Manage-System/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![C Standard](https://img.shields.io/badge/C-C11-yellow.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 
