@@ -102,9 +102,42 @@ static const char *SCHEMA_SQL =
     "    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
     "    FOREIGN KEY (property_code) REFERENCES properties(code)"
     ");"
+    "CREATE TABLE IF NOT EXISTS work_orders ("
+    "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "    property_code TEXT NOT NULL,"
+    "    reported_by TEXT NOT NULL,"
+    "    assigned_to TEXT DEFAULT '',"
+    "    type INTEGER NOT NULL,"
+    "    priority INTEGER NOT NULL,"
+    "    status INTEGER DEFAULT 0,"
+    "    title TEXT NOT NULL,"
+    "    description TEXT DEFAULT '',"
+    "    estimated_cost REAL DEFAULT 0,"
+    "    actual_cost REAL DEFAULT 0,"
+    "    reported_date TEXT NOT NULL,"
+    "    scheduled_date TEXT DEFAULT '',"
+    "    completed_date TEXT DEFAULT '',"
+    "    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+    "    FOREIGN KEY (property_code) REFERENCES properties(code),"
+    "    FOREIGN KEY (reported_by) REFERENCES users(username),"
+    "    FOREIGN KEY (assigned_to) REFERENCES users(username)"
+    ");"
+    "CREATE INDEX IF NOT EXISTS idx_properties_type_action ON properties(ptype, action);"
+    "CREATE INDEX IF NOT EXISTS idx_properties_district ON properties(district);"
+    "CREATE INDEX IF NOT EXISTS idx_properties_location ON properties(location);"
+    "CREATE INDEX IF NOT EXISTS idx_properties_username ON properties(username);"
+    "CREATE INDEX IF NOT EXISTS idx_properties_active ON properties(active);"
+    "CREATE INDEX IF NOT EXISTS idx_leases_tenant ON leases(tenant_username);"
+    "CREATE INDEX IF NOT EXISTS idx_leases_property ON leases(property_code);"
+    "CREATE INDEX IF NOT EXISTS idx_leases_status ON leases(status);"
+    "CREATE INDEX IF NOT EXISTS idx_leases_dates ON leases(start_date, end_date);"
     "CREATE INDEX IF NOT EXISTS idx_expenses_property ON expenses(property_code);"
     "CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);"
-    "CREATE INDEX IF NOT EXISTS idx_expenses_type ON expenses(type);";
+    "CREATE INDEX IF NOT EXISTS idx_expenses_type ON expenses(type);"
+    "CREATE INDEX IF NOT EXISTS idx_work_orders_property ON work_orders(property_code);"
+    "CREATE INDEX IF NOT EXISTS idx_work_orders_status ON work_orders(status);"
+    "CREATE INDEX IF NOT EXISTS idx_work_orders_assigned ON work_orders(assigned_to);"
+    "CREATE INDEX IF NOT EXISTS idx_work_orders_dates ON work_orders(scheduled_date, completed_date);";
 
 Database *database_open(const char *path) {
     Database *db = malloc(sizeof(Database));
@@ -1412,7 +1445,7 @@ int db_property_count_filtered(Database *db, const char *where_clause) {
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) return 0;
     
-    int count = 0;
+int count = 0;
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         count = sqlite3_column_int(stmt, 0);
     }
@@ -1494,4 +1527,332 @@ int database_migrate_from_files(Database *db, const char *users_file, const char
         fclose(pf);
     }
     return 1;
+}
+
+// ============================================================================
+// WORK ORDER OPERATIONS
+// ============================================================================
+
+static void row_to_work_order(sqlite3_stmt *stmt, WorkOrder *wo) {
+    wo->id = sqlite3_column_int(stmt, 0);
+    strncpy(wo->property_code, (const char*)sqlite3_column_text(stmt, 1), MAX_FIELD_LEN - 1);
+    strncpy(wo->reported_by, (const char*)sqlite3_column_text(stmt, 2), MAX_FIELD_LEN - 1);
+    strncpy(wo->assigned_to, (const char*)sqlite3_column_text(stmt, 3), MAX_FIELD_LEN - 1);
+    wo->type = (WorkOrderType)sqlite3_column_int(stmt, 4);
+    wo->priority = (WorkOrderPriority)sqlite3_column_int(stmt, 5);
+    wo->status = (WorkOrderStatus)sqlite3_column_int(stmt, 6);
+    strncpy(wo->title, (const char*)sqlite3_column_text(stmt, 7), MAX_STRING_LEN - 1);
+    strncpy(wo->description, (const char*)sqlite3_column_text(stmt, 8), MAX_STRING_LEN - 1);
+    wo->estimated_cost = sqlite3_column_double(stmt, 9);
+    wo->actual_cost = sqlite3_column_double(stmt, 10);
+    strncpy(wo->reported_date, (const char*)sqlite3_column_text(stmt, 11), MAX_FIELD_LEN - 1);
+    strncpy(wo->scheduled_date, (const char*)sqlite3_column_text(stmt, 12), MAX_FIELD_LEN - 1);
+    strncpy(wo->completed_date, (const char*)sqlite3_column_text(stmt, 13), MAX_FIELD_LEN - 1);
+    strncpy(wo->created_at, (const char*)sqlite3_column_text(stmt, 14), MAX_FIELD_LEN - 1);
+}
+
+static int bind_work_order_stmt(sqlite3_stmt *stmt, const WorkOrder *wo) {
+    sqlite3_bind_text(stmt, 1, wo->property_code, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, wo->reported_by, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, wo->assigned_to, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 4, (int)wo->type);
+    sqlite3_bind_int(stmt, 5, (int)wo->priority);
+    sqlite3_bind_int(stmt, 6, (int)wo->status);
+    sqlite3_bind_text(stmt, 7, wo->title, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 8, wo->description, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 9, wo->estimated_cost);
+    sqlite3_bind_double(stmt, 10, wo->actual_cost);
+    sqlite3_bind_text(stmt, 11, wo->reported_date, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 12, wo->scheduled_date, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 13, wo->completed_date, -1, SQLITE_STATIC);
+    return SQLITE_OK;
+}
+
+int db_work_order_create(Database *db, const WorkOrder *wo) {
+    if (!db || !wo) return 0;
+    const char *sql = "INSERT INTO work_orders (property_code, reported_by, assigned_to, type, priority, status, title, description, estimated_cost, actual_cost, reported_date, scheduled_date, completed_date) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    bind_work_order_stmt(stmt, wo);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE;
+}
+
+WorkOrder *db_work_order_find_by_id(Database *db, int id) {
+    if (!db) return NULL;
+    const char *sql = "SELECT id, property_code, reported_by, assigned_to, type, priority, status, title, description, estimated_cost, actual_cost, reported_date, scheduled_date, completed_date, created_at "
+                      "FROM work_orders WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return NULL;
+    
+    sqlite3_bind_int(stmt, 1, id);
+    
+    WorkOrder *wo = NULL;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        wo = malloc(sizeof(WorkOrder));
+        row_to_work_order(stmt, wo);
+    }
+    sqlite3_finalize(stmt);
+    return wo;
+}
+
+int db_work_order_update(Database *db, const WorkOrder *wo) {
+    if (!db || !wo) return 0;
+    const char *sql = "UPDATE work_orders SET property_code = ?, reported_by = ?, assigned_to = ?, type = ?, priority = ?, status = ?, title = ?, description = ?, estimated_cost = ?, actual_cost = ?, reported_date = ?, scheduled_date = ?, completed_date = ? WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    bind_work_order_stmt(stmt, wo);
+    sqlite3_bind_int(stmt, 14, wo->id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
+}
+
+int db_work_order_delete(Database *db, int id) {
+    if (!db) return 0;
+    const char *sql = "DELETE FROM work_orders WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
+}
+
+int db_work_order_list_all(Database *db, WorkOrder **wos, int *count) {
+    if (!db || !wos || !count) return 0;
+    const char *sql = "SELECT id, property_code, reported_by, assigned_to, type, priority, status, title, description, estimated_cost, actual_cost, reported_date, scheduled_date, completed_date, created_at "
+                      "FROM work_orders ORDER BY created_at DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int capacity = 100;
+    *wos = malloc(capacity * sizeof(WorkOrder));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *wos = realloc(*wos, capacity * sizeof(WorkOrder));
+        }
+        row_to_work_order(stmt, &(*wos)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_work_order_list_by_property(Database *db, const char *property_code, WorkOrder **wos, int *count) {
+    if (!db || !property_code || !wos || !count) return 0;
+    const char *sql = "SELECT id, property_code, reported_by, assigned_to, type, priority, status, title, description, estimated_cost, actual_cost, reported_date, scheduled_date, completed_date, created_at "
+                      "FROM work_orders WHERE property_code = ? ORDER BY created_at DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, property_code, -1, SQLITE_STATIC);
+    
+    int capacity = 100;
+    *wos = malloc(capacity * sizeof(WorkOrder));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *wos = realloc(*wos, capacity * sizeof(WorkOrder));
+        }
+        row_to_work_order(stmt, &(*wos)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_work_order_list_by_status(Database *db, WorkOrderStatus status, WorkOrder **wos, int *count) {
+    if (!db || !wos || !count) return 0;
+    const char *sql = "SELECT id, property_code, reported_by, assigned_to, type, priority, status, title, description, estimated_cost, actual_cost, reported_date, scheduled_date, completed_date, created_at "
+                      "FROM work_orders WHERE status = ? ORDER BY created_at DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, (int)status);
+    
+    int capacity = 100;
+    *wos = malloc(capacity * sizeof(WorkOrder));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *wos = realloc(*wos, capacity * sizeof(WorkOrder));
+        }
+        row_to_work_order(stmt, &(*wos)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_work_order_list_by_assigned(Database *db, const char *username, WorkOrder **wos, int *count) {
+    if (!db || !username || !wos || !count) return 0;
+    const char *sql = "SELECT id, property_code, reported_by, assigned_to, type, priority, status, title, description, estimated_cost, actual_cost, reported_date, scheduled_date, completed_date, created_at "
+                      "FROM work_orders WHERE assigned_to = ? ORDER BY created_at DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    
+    int capacity = 100;
+    *wos = malloc(capacity * sizeof(WorkOrder));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *wos = realloc(*wos, capacity * sizeof(WorkOrder));
+        }
+        row_to_work_order(stmt, &(*wos)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_work_order_list_by_reported(Database *db, const char *username, WorkOrder **wos, int *count) {
+    if (!db || !username || !wos || !count) return 0;
+    const char *sql = "SELECT id, property_code, reported_by, assigned_to, type, priority, status, title, description, estimated_cost, actual_cost, reported_date, scheduled_date, completed_date, created_at "
+                      "FROM work_orders WHERE reported_by = ? ORDER BY created_at DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    
+    int capacity = 100;
+    *wos = malloc(capacity * sizeof(WorkOrder));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *wos = realloc(*wos, capacity * sizeof(WorkOrder));
+        }
+        row_to_work_order(stmt, &(*wos)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_work_order_list_by_priority(Database *db, WorkOrderPriority priority, WorkOrder **wos, int *count) {
+    if (!db || !wos || !count) return 0;
+    const char *sql = "SELECT id, property_code, reported_by, assigned_to, type, priority, status, title, description, estimated_cost, actual_cost, reported_date, scheduled_date, completed_date, created_at "
+                      "FROM work_orders WHERE priority = ? ORDER BY created_at DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, (int)priority);
+    
+    int capacity = 100;
+    *wos = malloc(capacity * sizeof(WorkOrder));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *wos = realloc(*wos, capacity * sizeof(WorkOrder));
+        }
+        row_to_work_order(stmt, &(*wos)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_work_order_list_overdue(Database *db, WorkOrder **wos, int *count) {
+    if (!db || !wos || !count) return 0;
+    const char *sql = "SELECT id, property_code, reported_by, assigned_to, type, priority, status, title, description, estimated_cost, actual_cost, reported_date, scheduled_date, completed_date, created_at "
+                      "FROM work_orders WHERE status IN (0, 1) AND scheduled_date != '' AND date(scheduled_date) < date('now') ORDER BY scheduled_date ASC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int capacity = 100;
+    *wos = malloc(capacity * sizeof(WorkOrder));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *wos = realloc(*wos, capacity * sizeof(WorkOrder));
+        }
+        row_to_work_order(stmt, &(*wos)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_work_order_count(Database *db) {
+    if (!db) return 0;
+    const char *sql = "SELECT COUNT(*) FROM work_orders";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+int db_work_order_count_by_property(Database *db, const char *property_code) {
+    if (!db || !property_code) return 0;
+    const char *sql = "SELECT COUNT(*) FROM work_orders WHERE property_code = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, property_code, -1, SQLITE_STATIC);
+    
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+int db_work_order_count_by_status(Database *db, WorkOrderStatus status) {
+    if (!db) return 0;
+    const char *sql = "SELECT COUNT(*) FROM work_orders WHERE status = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, (int)status);
+    
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
 }
