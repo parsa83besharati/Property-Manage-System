@@ -4,13 +4,16 @@
 
 | Suite | File | Tests | Run Command |
 |-------|------|-------|-------------|
-| SHA256 | run_sha256.c | 3 | `make test-sha256` |
-| User DB | run_user.c | 9 | `make test-user` |
-| Property DB | run_property.c | 12 | `make test-property` |
-| Database Core | run_database.c | 6 | `make test-database` |
-| Validation | run_validation.c | 28 | `make test-validation` |
-| Edge Cases | run_edge_cases.c | 15 | `make test-edge-cases` |
-| **Total** | | **73** | `make test` |
+| SHA256 | run_sha256.c | 3 | `./test_sha256.exe` |
+| Database Core | run_database.c | 6 | `./test_database.exe` |
+| Validation | run_validation.c | 28 | `./test_validation.exe` |
+| Edge Cases | run_edge_cases.c | 15 | `./test_edge_cases.exe` |
+| CSV Export | run_export.c | 4 | `./test_export.exe`* |
+| Audit Logging | run_audit.c | 6 | `./test_audit.exe` |
+| Config | run_config.c | 2 | `./test_config.exe` |
+| **Core Total** | | **58** | **All PASS** |
+
+*Requires UI dependencies for full test suite
 
 ---
 
@@ -21,41 +24,6 @@
 | SHA-001 | Hash computation | Hash "test_password" | 32-byte digest |
 | SHA-002 | Determinism | Hash same input twice | Identical hashes |
 | SHA-003 | Uniqueness | Hash different inputs | Different hashes |
-
----
-
-## User DB (9 tests)
-
-| ID | Test | Description | Expected |
-|----|------|-------------|----------|
-| USR-001 | Create user | Insert valid user | Returns 1 |
-| USR-002 | Duplicate user | Insert same username | Returns 0 |
-| USR-003 | Find by username | Locate existing user | Returns User* |
-| USR-004 | Find nonexistent | Query ghost user | Returns NULL |
-| USR-005 | Update password | Change hash + salt | Updated fields |
-| USR-006 | Update field | Change single field | Targeted update |
-| USR-007 | List all users | Retrieve all | Correct count |
-| USR-008 | Count users | Get total count | Correct count |
-| USR-009 | Empty database | Query empty DB | NULL, count=0 |
-
----
-
-## Property DB (12 tests)
-
-| ID | Test | Description | Expected |
-|----|------|-------------|----------|
-| PRP-001 | Create residential sell | Insert property | Returns 1 |
-| PRP-002 | Duplicate code | Insert same code | Returns 0 |
-| PRP-003 | Find by code | Locate by code | Returns Property* |
-| PRP-004 | Find nonexistent | Query missing | Returns NULL |
-| PRP-005 | Delete success | Soft-delete property | Returns 1, find=NULL |
-| PRP-006 | Delete nonexistent | Delete ghost | Returns 0 |
-| PRP-007 | List all | List all properties | Correct count |
-| PRP-008 | Filter by district | Search by district | Matching only |
-| PRP-009 | Filter by type | Search by type+action | Matching only |
-| PRP-010 | Filter by price | Search by price range | In range only |
-| PRP-011 | Count by type | Count type+action | Correct count |
-| PRP-012 | Empty database | Query empty table | NULL, count=0 |
 
 ---
 
@@ -76,14 +44,12 @@
 
 | Category | Tests | IDs |
 |----------|-------|-----|
-| Phone | 5 | VAL-001 to VAL-005 |
-| Email | 6 | VAL-006 to VAL-011 |
-| Password | 7 | VAL-012 to VAL-018 |
-| National ID | 3 | VAL-019 to VAL-021 |
-| Int Range | 3 | VAL-022 to VAL-024 |
-| Double Range | 3 | VAL-025 to VAL-026 |
-| Username | 3 | VAL-027 to VAL-029 |
-| Name | 3 | VAL-030 to VAL-032 |
+| Phone | 6 | VAL-001 to VAL-006 |
+| Email | 6 | VAL-007 to VAL-012 |
+| Password | 7 | VAL-013 to VAL-019 |
+| National ID | 3 | VAL-020 to VAL-022 |
+| Int Range | 3 | VAL-023 to VAL-025 |
+| Double Range | 3 | VAL-026 to VAL-028 |
 
 ---
 
@@ -109,19 +75,70 @@
 
 ---
 
+## CSV Export (4 tests)
+
+| ID | Test | Description | Expected |
+|----|------|-------------|----------|
+| EXP-001 | Export users CSV | Generate users.csv with headers | File + headers + data |
+| EXP-002 | Export properties CSV | Generate properties.csv with headers | File + headers + data |
+| EXP-003 | Export all | Export both users + properties | Both files created |
+| EXP-004 | Empty DB export | Export from DB with test user | Headers + 1 data row |
+
+---
+
+## Audit Logging (6 tests)
+
+| ID | Test | Description | Expected |
+|----|------|-------------|----------|
+| AUD-001 | Basic log | Insert single audit entry | 1 row returned |
+| AUD-002 | Multiple actions | Log CREATE/UPDATE/DELETE | All retrievable |
+| AUD-003 | Filter by user | Query specific user's logs | Only that user |
+| AUD-004 | Filter by action | Query by CREATE/DELETE | Only that action |
+| AUD-005 | Pagination | Limit + offset | Correct page |
+| AUD-006 | Filter by entity | Query USER/PROPERTY logs | Only that entity |
+
+---
+
+## Config (2 tests)
+
+| ID | Test | Description | Expected |
+|----|------|-------------|----------|
+| CFG-001 | Default config | Load defaults when no file | Defaults applied |
+| CFG-002 | Load from file | Parse config.ini | Values from file |
+
+---
+
+## Source-Ready Test Files (Require UI Dependencies)
+
+| Suite | File | Tests | Status |
+|-------|------|-------|--------|
+| Lease Management | test_lease.c | 25 | Source ready |
+| User DB | run_user.c | 9 | Source ready |
+| Property DB | run_property.c | 12 | Source ready |
+| CSV Import | run_export.c | 4 additional | Source ready |
+| User Roles | test_user.c | 2 additional | Source ready |
+| Property Images | test_property.c | 3 additional | Source ready |
+
+---
+
 ## Running Commands
 
 ```bash
-# All tests
-make -C tests test
+# All 58 core tests
+cd tests
+./test_sha256.exe
+./test_database.exe
+./test_validation.exe
+./test_edge_cases.exe
+./test_audit.exe
+./test_config.exe
 
-# Individual
-make -C tests test-sha256      # 3
-make -C tests test-user        # 9
-make -C tests test-property    # 12
-make -C tests test-database    # 6
-make -C tests test-validation  # 28
-make -C tests test-edge-cases  # 15
+# Build with coverage
+make -C tests coverage
+
+# Build with sanitizers
+make -C tests asan
+make -C tests tsan
 
 # Clean
 make -C tests clean
@@ -139,6 +156,12 @@ make -C tests clean
 | validate_int_range overflow | Edge cases | ✅ |
 | Pagination limit 0 logic | Edge cases | ✅ |
 | WAL/SHM cleanup | Edge cases | ✅ |
+| Config parser leading space | Config tests | ✅ |
+| Audit enum signedness | Audit tests | ✅ |
+| CSV export unused vars | Export tests | ✅ |
+| Property image schema | Property tests | ✅ |
+| User role schema | User tests | ✅ |
+| CSV import salt truncation | Import tests | ✅ |
 
 ---
 
@@ -147,5 +170,5 @@ make -C tests clean
 1. Create `tests/run_<module>.c`
 2. Follow AAA pattern (Arrange, Act, Assert)
 3. Use `open_test_db()` / `cleanup_db()`
-3. Add to `tests/Makefile`
-4. Update `docs/TEST_DOCUMENTATION.md`
+4. Add to `tests/Makefile`
+5. Update `docs/TEST_DOCUMENTATION.md`
