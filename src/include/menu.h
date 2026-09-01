@@ -12,4 +12,11 @@ void menu_search_properties(Database *db, const char *username);
 void menu_user_settings(Database *db, const char *username);
 void menu_admin(Database *db);
 
+// Lease management
+void menu_lease_management(Database *db, const char *username);
+void menu_create_lease(Database *db, const char *username);
+void menu_view_leases(Database *db, const char *username);
+void menu_lease_payments(Database *db, const char *username);
+void menu_terminate_lease(Database *db, const char *username);
+
 #endif

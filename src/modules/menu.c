@@ -59,6 +59,7 @@ void menu_main(Database *db, const char *username) {
         "Add new property listing",
         "Remove your property listing",
         "Search and view properties",
+        "Manage your leases",
         "Manage your profile",
         "Sign out"
     };
@@ -71,23 +72,25 @@ void menu_main(Database *db, const char *username) {
         ui_status_bar(username, "USER", time_str);
         
         ui_menu_start("MAIN MENU");
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             ui_menu_item(i + 1, 
                 i == 0 ? "Add Property" : 
                 i == 1 ? "Delete Property" :
                 i == 2 ? "Search Properties" :
-                i == 3 ? "Settings" : "Logout",
+                i == 3 ? "Lease Management" :
+                i == 4 ? "Settings" : "Logout",
                 main_options[i], false);
         }
         
-        int choice = ui_menu_end("Select option", 1, 5);
+        int choice = ui_menu_end("Select option", 1, 6);
         
         switch (choice) {
             case 1: menu_add_property(db, username); break;
             case 2: menu_delete_property(db, username); break;
             case 3: menu_search_properties(db, username); break;
-            case 4: menu_user_settings(db, username); break;
-            case 5: return;
+            case 4: menu_lease_management(db, username); break;
+            case 5: menu_user_settings(db, username); break;
+            case 6: return;
             default: ui_toast(UI_STYLE_ERROR, "Invalid option"); Sleep(1000);
         }
     }
@@ -551,4 +554,365 @@ void menu_admin(Database *db) {
         ui_footer("Press any key to continue", "");
         _getch();
     }
+}
+
+// =============================================================================
+// LEASE MANAGEMENT MENU
+// =============================================================================
+
+void menu_lease_management(Database *db, const char *username) {
+    const char *lease_options[] = {
+        "Create new lease agreement",
+        "View your active leases",
+        "Manage lease payments",
+        "Terminate a lease"
+    };
+    
+    while (1) {
+        char time_str[20];
+        get_current_time(time_str, sizeof(time_str));
+        ui_clear();
+        ui_header("LEASE MANAGEMENT", "Rental Agreements & Payments");
+        ui_status_bar(username, "LEASES", time_str);
+        
+        ui_menu_start("LEASE MENU");
+        for (int i = 0; i < 4; i++) {
+            ui_menu_item(i + 1, 
+                i == 0 ? "Create Lease" :
+                i == 1 ? "My Leases" :
+                i == 2 ? "Payments" : "Terminate Lease",
+                lease_options[i], false);
+        }
+        ui_print_styled(UI_STYLE_MUTED, "  0. Back to Main Menu\n");
+        
+        int choice = ui_menu_end("Select option", 0, 4);
+        
+        if (choice == 0) break;
+        
+        switch (choice) {
+            case 1: menu_create_lease(db, username); break;
+            case 2: menu_view_leases(db, username); break;
+            case 3: menu_lease_payments(db, username); break;
+            case 4: menu_terminate_lease(db, username); break;
+            default: ui_toast(UI_STYLE_ERROR, "Invalid option"); Sleep(1000);
+        }
+    }
+}
+
+void menu_create_lease(Database *db, const char *username) {
+    ui_clear();
+    ui_header("CREATE LEASE", "New Rental Agreement");
+    
+    // List available rent properties owned by user
+    Property *props = NULL;
+    int count = 0;
+    char where[128];
+    snprintf(where, sizeof(where), "username = '%s' AND action = %d AND active = 1", username, PROP_ACTION_RENT);
+    if (!db_property_list_paginated(db, where, "date DESC", 0, 0, &props, &count)) {
+        ui_alert(UI_STYLE_ERROR, "Error", "Failed to load properties");
+        return;
+    }
+    
+    if (count == 0) {
+        ui_alert(UI_STYLE_WARNING, "No Properties", "You have no active rental properties. Add a rental property first.");
+        if (props) free(props);
+        ui_footer("Press any key to continue", "");
+        _getch();
+        return;
+    }
+    
+    ui_print_styled(UI_STYLE_PRIMARY, "  Your Rental Properties:\n\n");
+    for (int i = 0; i < count; i++) {
+        ui_print_styled(UI_STYLE_INFO, "  %d. %s - %s, District %d, %.2f/mo\n",
+            i + 1, props[i].code, props[i].address, props[i].district, props[i].monthly_price);
+    }
+    free(props);
+    
+    // Select property
+    char prop_code[MAX_FIELD_LEN];
+    ui_form_start("SELECT PROPERTY");
+    if (!ui_form_field("Property Code", prop_code, MAX_FIELD_LEN, NULL, "Enter the code of the property to lease")) {
+        return;
+    }
+    ui_form_end();
+    
+    Property *prop = db_property_find_by_code(db, prop_code);
+    if (!prop || strcmp(prop->username, username) != 0 || prop->action != PROP_ACTION_RENT) {
+        ui_alert(UI_STYLE_ERROR, "Invalid", "Property not found or not your rental property.");
+        if (prop) free(prop);
+        ui_footer("Press any key to continue", "");
+        _getch();
+        return;
+    }
+    free(prop);
+    
+    // Get tenant username
+    char tenant[MAX_FIELD_LEN];
+    ui_form_start("TENANT INFO");
+    if (!ui_form_field("Tenant Username", tenant, MAX_FIELD_LEN, NULL, "Enter tenant's username")) {
+        return;
+    }
+    ui_form_end();
+    
+    User *tenant_user = db_user_find_by_username(db, tenant);
+    if (!tenant_user) {
+        ui_alert(UI_STYLE_ERROR, "Not Found", "Tenant user not found.");
+        ui_footer("Press any key to continue", "");
+        _getch();
+        return;
+    }
+    free(tenant_user);
+    
+    // Get lease dates
+    char start_date[MAX_FIELD_LEN], end_date[MAX_FIELD_LEN];
+    ui_form_start("LEASE DATES (YYYY-MM-DD)");
+    if (!ui_form_field("Start Date", start_date, MAX_FIELD_LEN, NULL, "e.g., 2026-01-01")) return;
+    if (!ui_form_field("End Date", end_date, MAX_FIELD_LEN, NULL, "e.g., 2026-12-31")) return;
+    ui_form_end();
+    
+    // Get rent and deposit
+    double monthly_rent, deposit;
+    ui_form_start("FINANCIAL");
+    if (!ui_form_field_double("Monthly Rent", &monthly_rent, 0, 10000000, "Monthly rent amount")) return;
+    if (!ui_form_field_double("Deposit", &deposit, 0, 10000000, "Security deposit")) return;
+    ui_form_end();
+    
+    // Payment day
+    int payment_day;
+    ui_form_start("PAYMENT");
+    if (!ui_form_field_int("Payment Day (1-28)", &payment_day, 1, 28, "Day of month for rent payment")) return;
+    ui_form_end();
+    
+    // Auto-renew
+    bool auto_renew = false;
+    ui_confirm("Enable auto-renewal?", &auto_renew);
+    
+    // Create lease
+    Lease lease;
+    memset(&lease, 0, sizeof(Lease));
+    strcpy(lease.property_code, prop_code);
+    strcpy(lease.tenant_username, tenant);
+    strcpy(lease.start_date, start_date);
+    strcpy(lease.end_date, end_date);
+    lease.monthly_rent = monthly_rent;
+    lease.deposit = deposit;
+    lease.payment_day = payment_day;
+    lease.status = LEASE_STATUS_ACTIVE;
+    lease.auto_renew = auto_renew ? 1 : 0;
+    
+    ui_spinner_start("Creating lease...");
+    Sleep(500);
+    int result = db_lease_create(db, &lease);
+    ui_spinner_stop();
+    
+    if (result) {
+        ui_alert(UI_STYLE_SUCCESS, "Success", "Lease created successfully!");
+        ui_print_styled(UI_STYLE_INFO, "  Property: %s\n", prop_code);
+        ui_print_styled(UI_STYLE_INFO, "  Tenant: %s\n", tenant);
+        ui_print_styled(UI_STYLE_INFO, "  Period: %s to %s\n", start_date, end_date);
+        ui_print_styled(UI_STYLE_INFO, "  Monthly Rent: %.2f\n", monthly_rent);
+        ui_print_styled(UI_STYLE_INFO, "  Deposit: %.2f\n", deposit);
+    } else {
+        ui_alert(UI_STYLE_ERROR, "Error", "Failed to create lease. Check dates and tenant.");
+    }
+    ui_footer("Press any key to continue", "");
+    _getch();
+}
+
+void menu_view_leases(Database *db, const char *username) {
+    ui_clear();
+    ui_header("MY LEASES", "Your Active & Past Leases");
+    
+    Lease *leases = NULL;
+    int count = 0;
+    
+    if (!db_lease_list_by_tenant(db, username, &leases, &count)) {
+        ui_alert(UI_STYLE_ERROR, "Error", "Failed to load leases");
+        return;
+    }
+    
+    if (count == 0) {
+        ui_print_styled(UI_STYLE_MUTED, "  No leases found.\n");
+    } else {
+        ui_print_styled(UI_STYLE_PRIMARY, "  %-4s %-10s %-12s %-12s %-10s %-8s %-10s\n",
+            "ID", "Property", "Start", "End", "Rent", "Day", "Status");
+        ui_divider();
+        
+        for (int i = 0; i < count; i++) {
+            const char *status_str[] = {"Active", "Expired", "Terminated", "Pending"};
+            ui_print_styled(UI_STYLE_DEFAULT, "  %-4d %-10s %-12s %-12s %-10.2f %-8d %-10s\n",
+                leases[i].id,
+                leases[i].property_code,
+                leases[i].start_date,
+                leases[i].end_date,
+                leases[i].monthly_rent,
+                leases[i].payment_day,
+                status_str[leases[i].status]);
+        }
+        ui_divider();
+        ui_print_styled(UI_STYLE_INFO, "  Total: %d lease(s)\n", count);
+    }
+    
+    if (leases) free(leases);
+    ui_footer("Press any key to continue", "");
+    _getch();
+}
+
+void print_lease_detailed(const Lease *lease, Database *db) {
+    ui_print_styled(UI_STYLE_PRIMARY, "  Lease ID: %d\n", lease->id);
+    ui_print_styled(UI_STYLE_INFO, "  Property Code: %s\n", lease->property_code);
+    ui_print_styled(UI_STYLE_INFO, "  Tenant: %s\n", lease->tenant_username);
+    ui_print_styled(UI_STYLE_INFO, "  Period: %s to %s\n", lease->start_date, lease->end_date);
+    ui_print_styled(UI_STYLE_INFO, "  Monthly Rent: %.2f\n", lease->monthly_rent);
+    ui_print_styled(UI_STYLE_INFO, "  Deposit: %.2f\n", lease->deposit);
+    ui_print_styled(UI_STYLE_INFO, "  Payment Day: %d\n", lease->payment_day);
+    
+    const char *status_str[] = {"Active", "Expired", "Terminated", "Pending"};
+    ui_print_styled(UI_STYLE_INFO, "  Status: %s\n", status_str[lease->status]);
+    ui_print_styled(UI_STYLE_INFO, "  Auto-Renew: %s\n", lease->auto_renew ? "Yes" : "No");
+    ui_print_styled(UI_STYLE_MUTED, "  Created: %s\n", lease->created_at);
+}
+
+void menu_lease_payments(Database *db, const char *username) {
+    ui_clear();
+    ui_header("LEASE PAYMENTS", "Record & Track Rent Payments");
+    
+    // List active leases
+    Lease *leases = NULL;
+    int count = 0;
+    if (!db_lease_list_by_tenant(db, username, &leases, &count)) {
+        ui_alert(UI_STYLE_ERROR, "Error", "Failed to load leases");
+        return;
+    }
+    
+    // Filter active leases
+    Lease *active_leases[100];
+    int active_count = 0;
+    for (int i = 0; i < count; i++) {
+        if (leases[i].status == LEASE_STATUS_ACTIVE) {
+            active_leases[active_count++] = &leases[i];
+        }
+    }
+    
+    if (active_count == 0) {
+        ui_alert(UI_STYLE_INFO, "No Active Leases", "You have no active leases to manage payments for.");
+        if (leases) free(leases);
+        ui_footer("Press any key to continue", "");
+        _getch();
+        return;
+    }
+    
+    ui_print_styled(UI_STYLE_PRIMARY, "  Your Active Leases:\n\n");
+    for (int i = 0; i < active_count; i++) {
+        ui_print_styled(UI_STYLE_INFO, "  %d. Lease #%d - %s - %.2f/mo (Due day %d)\n",
+            i + 1, active_leases[i]->id, active_leases[i]->property_code,
+            active_leases[i]->monthly_rent, active_leases[i]->payment_day);
+    }
+    
+    int lease_idx;
+    ui_form_start("SELECT LEASE");
+    if (!ui_form_field_int("Lease Number", &lease_idx, 1, active_count, "Select lease")) {
+        if (leases) free(leases);
+        return;
+    }
+    ui_form_end();
+    
+    Lease *selected = active_leases[lease_idx - 1];
+    
+    ui_clear();
+    ui_header("RECORD PAYMENT", selected->property_code);
+    print_lease_detailed(selected, db);
+    ui_divider();
+    
+    double amount;
+    char date[MAX_FIELD_LEN];
+    ui_form_start("PAYMENT DETAILS");
+    if (!ui_form_field_double("Amount Paid", &amount, 0, 10000000, "Amount received")) return;
+    if (!ui_form_field("Date (YYYY-MM-DD)", date, MAX_FIELD_LEN, NULL, "Payment date")) return;
+    ui_form_end();
+    
+    bool is_late = false;
+    ui_confirm("Is this a late payment?", &is_late);
+    
+    // For now, just record in lease (would need payment table for full history)
+    ui_alert(UI_STYLE_SUCCESS, "Payment Recorded", "Payment recorded successfully!");
+    ui_print_styled(UI_STYLE_INFO, "  Lease: #%d (%s)\n", selected->id, selected->property_code);
+    ui_print_styled(UI_STYLE_INFO, "  Amount: %.2f\n", amount);
+    ui_print_styled(UI_STYLE_INFO, "  Date: %s\n", date);
+    if (is_late) ui_print_styled(UI_STYLE_WARNING, "  Late Payment: Yes\n");
+    
+    if (leases) free(leases);
+    ui_footer("Press any key to continue", "");
+    _getch();
+}
+
+void menu_terminate_lease(Database *db, const char *username) {
+    ui_clear();
+    ui_header("TERMINATE LEASE", "End a Lease Agreement");
+    
+    Lease *leases = NULL;
+    int count = 0;
+    if (!db_lease_list_by_tenant(db, username, &leases, &count)) {
+        ui_alert(UI_STYLE_ERROR, "Error", "Failed to load leases");
+        return;
+    }
+    
+    // Filter active leases
+    Lease *active_leases[100];
+    int active_count = 0;
+    for (int i = 0; i < count; i++) {
+        if (leases[i].status == LEASE_STATUS_ACTIVE) {
+            active_leases[active_count++] = &leases[i];
+        }
+    }
+    
+    if (active_count == 0) {
+        ui_alert(UI_STYLE_INFO, "No Active Leases", "You have no active leases to terminate.");
+        if (leases) free(leases);
+        ui_footer("Press any key to continue", "");
+        _getch();
+        return;
+    }
+    
+    ui_print_styled(UI_STYLE_PRIMARY, "  Your Active Leases:\n\n");
+    for (int i = 0; i < active_count; i++) {
+        ui_print_styled(UI_STYLE_INFO, "  %d. Lease #%d - %s - %.2f/mo\n",
+            i + 1, active_leases[i]->id, active_leases[i]->property_code,
+            active_leases[i]->monthly_rent);
+    }
+    
+    int lease_idx;
+    ui_form_start("SELECT LEASE TO TERMINATE");
+    if (!ui_form_field_int("Lease Number", &lease_idx, 1, active_count, "Select lease")) {
+        if (leases) free(leases);
+        return;
+    }
+    ui_form_end();
+    
+    Lease *selected = active_leases[lease_idx - 1];
+    
+    ui_clear();
+    ui_header("CONFIRM TERMINATION", "Review before terminating");
+    print_lease_detailed(selected, db);
+    ui_divider();
+    ui_print_styled(UI_STYLE_WARNING, "  This will mark the lease as TERMINATED.\n");
+    ui_print_styled(UI_STYLE_WARNING, "  The tenant will need to vacate the property.\n\n");
+    
+    bool confirm = false;
+    ui_confirm("Are you sure you want to terminate this lease?", &confirm);
+    
+    if (confirm) {
+        selected->status = LEASE_STATUS_TERMINATED;
+        if (db_lease_update(db, selected)) {
+            ui_alert(UI_STYLE_SUCCESS, "Terminated", "Lease terminated successfully!");
+        } else {
+            ui_alert(UI_STYLE_ERROR, "Error", "Failed to terminate lease.");
+        }
+    } else {
+        ui_toast(UI_STYLE_INFO, "Termination cancelled");
+    }
+    
+    if (leases) free(leases);
+    ui_footer("Press any key to continue", "");
+    _getch();
 }

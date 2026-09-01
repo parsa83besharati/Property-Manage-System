@@ -7,6 +7,11 @@ int export_users_to_csv(Database *db, const char *filename);
 int export_properties_to_csv(Database *db, const char *filename);
 int export_all_to_csv(Database *db, const char *users_file, const char *properties_file);
 
+// Lease export functions
+int export_leases_to_csv(Database *db, const char *filename);
+int export_payments_to_csv(Database *db, const char *filename);
+int export_all_to_csv(Database *db, const char *users_file, const char *properties_file, const char *leases_file, const char *payments_file);
+
 // CSV Import functions
 int import_users_from_csv(Database *db, const char *filename, int *imported, int *skipped);
 int import_properties_from_csv(Database *db, const char *filename, int *imported, int *skipped);

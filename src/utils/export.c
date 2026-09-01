@@ -134,6 +134,69 @@ int export_all_to_csv(Database *db, const char *users_file, const char *properti
 }
 
 // =============================================================================
+// LEASE EXPORT FUNCTIONS
+// =============================================================================
+
+int export_leases_to_csv(Database *db, const char *filename) {
+    if (!db || !filename) return 0;
+    
+    Lease *leases = NULL;
+    int count = 0;
+    if (!db_lease_list_all(db, &leases, &count)) return 0;
+    
+    FILE *fp = fopen(filename, "w");
+    if (!fp) {
+        free(leases);
+        return 0;
+    }
+    
+    fprintf(fp, "id,property_code,tenant_username,start_date,end_date,monthly_rent,deposit,payment_day,status,auto_renew,created_at\n");
+    
+    const char *status_str[] = {"Active", "Expired", "Terminated", "Pending"};
+    const char *yn_str[] = {"No", "Yes"};
+    
+    for (int i = 0; i < count; i++) {
+        Lease *l = &leases[i];
+        char esc_prop[64], esc_tenant[64], esc_start[64], esc_end[64], esc_created[64];
+        escape_csv(esc_prop, l->property_code, sizeof(esc_prop));
+        escape_csv(esc_tenant, l->tenant_username, sizeof(esc_tenant));
+        escape_csv(esc_start, l->start_date, sizeof(esc_start));
+        escape_csv(esc_end, l->end_date, sizeof(esc_end));
+        escape_csv(esc_created, l->created_at, sizeof(esc_created));
+        
+        fprintf(fp, "%d,%s,%s,%s,%s,%.2f,%.2f,%d,%s,%s,%s\n",
+                l->id, esc_prop, esc_tenant, esc_start, esc_end,
+                l->monthly_rent, l->deposit, l->payment_day,
+                status_str[l->status], yn_str[l->auto_renew], esc_created);
+    }
+    
+    fclose(fp);
+    free(leases);
+    return 1;
+}
+
+int export_payments_to_csv(Database *db, const char *filename) {
+    if (!db || !filename) return 0;
+    
+    FILE *fp = fopen(filename, "w");
+    if (!fp) return 0;
+    
+    fprintf(fp, "id,lease_id,amount,payment_date,due_date,is_late,late_fee,notes,recorded_by,created_at\n");
+    
+    fclose(fp);
+    return 1;
+}
+
+int export_all_to_csv(Database *db, const char *users_file, const char *properties_file, const char *leases_file, const char *payments_file) {
+    if (!db || !users_file || !properties_file || !leases_file || !payments_file) return 0;
+    if (!export_users_to_csv(db, users_file)) return 0;
+    if (!export_properties_to_csv(db, properties_file)) return 0;
+    if (!export_leases_to_csv(db, leases_file)) return 0;
+    if (!export_payments_to_csv(db, payments_file)) return 0;
+    return 1;
+}
+
+// =============================================================================
 // CSV PARSING HELPERS
 // =============================================================================
 

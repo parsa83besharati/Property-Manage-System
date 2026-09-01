@@ -68,6 +68,20 @@ static const char *SCHEMA_SQL =
     "    FOREIGN KEY (property_code) REFERENCES properties(code),"
     "    FOREIGN KEY (tenant_username) REFERENCES users(username)"
     ");"
+    "CREATE TABLE IF NOT EXISTS payments ("
+    "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "    lease_id INTEGER NOT NULL,"
+    "    amount REAL NOT NULL,"
+    "    payment_date TEXT NOT NULL,"
+    "    due_date TEXT NOT NULL,"
+    "    is_late INTEGER DEFAULT 0,"
+    "    late_fee REAL DEFAULT 0,"
+    "    notes TEXT DEFAULT '',"
+    "    recorded_by TEXT NOT NULL,"
+    "    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+    "    FOREIGN KEY (lease_id) REFERENCES leases(id),"
+    "    FOREIGN KEY (recorded_by) REFERENCES users(username)"
+    ");"
     "CREATE INDEX IF NOT EXISTS idx_properties_type_action ON properties(ptype, action);"
     "CREATE INDEX IF NOT EXISTS idx_properties_district ON properties(district);"
     "CREATE INDEX IF NOT EXISTS idx_properties_location ON properties(location);"
@@ -634,6 +648,272 @@ int db_lease_count_by_property(Database *db, const char *property_code) {
     }
     sqlite3_finalize(stmt);
     return count;
+}
+
+// ============================================================================
+// PAYMENT OPERATIONS
+// ============================================================================
+
+static void row_to_payment(sqlite3_stmt *stmt, Payment *payment) {
+    payment->id = sqlite3_column_int(stmt, 0);
+    payment->lease_id = sqlite3_column_int(stmt, 1);
+    payment->amount = sqlite3_column_double(stmt, 2);
+    strncpy(payment->payment_date, (const char*)sqlite3_column_text(stmt, 3), MAX_FIELD_LEN - 1);
+    strncpy(payment->due_date, (const char*)sqlite3_column_text(stmt, 4), MAX_FIELD_LEN - 1);
+    payment->is_late = sqlite3_column_int(stmt, 5);
+    payment->late_fee = sqlite3_column_double(stmt, 6);
+    strncpy(payment->notes, (const char*)sqlite3_column_text(stmt, 7), MAX_STRING_LEN - 1);
+    strncpy(payment->recorded_by, (const char*)sqlite3_column_text(stmt, 8), MAX_FIELD_LEN - 1);
+    strncpy(payment->created_at, (const char*)sqlite3_column_text(stmt, 9), MAX_FIELD_LEN - 1);
+}
+
+int db_payment_create(Database *db, const Payment *payment) {
+    if (!db || !payment) return 0;
+    const char *sql = "INSERT INTO payments (lease_id, amount, payment_date, due_date, is_late, late_fee, notes, recorded_by) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, payment->lease_id);
+    sqlite3_bind_double(stmt, 2, payment->amount);
+    sqlite3_bind_text(stmt, 3, payment->payment_date, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, payment->due_date, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 5, payment->is_late);
+    sqlite3_bind_double(stmt, 6, payment->late_fee);
+    sqlite3_bind_text(stmt, 7, payment->notes, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 8, payment->recorded_by, -1, SQLITE_STATIC);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE;
+}
+
+Payment *db_payment_find_by_id(Database *db, int id) {
+    if (!db) return NULL;
+    const char *sql = "SELECT id, lease_id, amount, payment_date, due_date, is_late, late_fee, notes, recorded_by, created_at "
+                      "FROM payments WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return NULL;
+    
+    sqlite3_bind_int(stmt, 1, id);
+    
+    Payment *payment = NULL;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        payment = malloc(sizeof(Payment));
+        row_to_payment(stmt, payment);
+    }
+    sqlite3_finalize(stmt);
+    return payment;
+}
+
+int db_payment_list_by_lease(Database *db, int lease_id, Payment **payments, int *count) {
+    if (!db || !payments || !count) return 0;
+    const char *sql = "SELECT id, lease_id, amount, payment_date, due_date, is_late, late_fee, notes, recorded_by, created_at "
+                      "FROM payments WHERE lease_id = ? ORDER BY payment_date DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, lease_id);
+    
+    int capacity = 100;
+    *payments = malloc(capacity * sizeof(Payment));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *payments = realloc(*payments, capacity * sizeof(Payment));
+        }
+        row_to_payment(stmt, &(*payments)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_payment_list_by_date_range(Database *db, const char *start_date, const char *end_date, Payment **payments, int *count) {
+    if (!db || !start_date || !end_date || !payments || !count) return 0;
+    const char *sql = "SELECT id, lease_id, amount, payment_date, due_date, is_late, late_fee, notes, recorded_by, created_at "
+                      "FROM payments WHERE payment_date BETWEEN ? AND ? ORDER BY payment_date DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, start_date, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, end_date, -1, SQLITE_STATIC);
+    
+    int capacity = 100;
+    *payments = malloc(capacity * sizeof(Payment));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *payments = realloc(*payments, capacity * sizeof(Payment));
+        }
+        row_to_payment(stmt, &(*payments)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_payment_list_late(Database *db, Payment **payments, int *count) {
+    if (!db || !payments || !count) return 0;
+    const char *sql = "SELECT id, lease_id, amount, payment_date, due_date, is_late, late_fee, notes, recorded_by, created_at "
+                      "FROM payments WHERE is_late = 1 ORDER BY payment_date DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int capacity = 100;
+    *payments = malloc(capacity * sizeof(Payment));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *payments = realloc(*payments, capacity * sizeof(Payment));
+        }
+        row_to_payment(stmt, &(*payments)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+double db_payment_sum_by_lease(Database *db, int lease_id) {
+    if (!db) return 0.0;
+    const char *sql = "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE lease_id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0.0;
+    
+    sqlite3_bind_int(stmt, 1, lease_id);
+    
+    double sum = 0.0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        sum = sqlite3_column_double(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return sum;
+}
+
+int db_payment_count(Database *db) {
+    if (!db) return 0;
+    const char *sql = "SELECT COUNT(*) FROM payments";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+// ============================================================================
+// RENEWAL OPERATIONS
+// ============================================================================
+
+int db_lease_check_expiring(Database *db, int days_ahead, Lease **leases, int *count) {
+    return db_lease_list_expiring(db, days_ahead, leases, count);
+}
+
+int db_lease_auto_renew(Database *db, int lease_id) {
+    if (!db) return 0;
+    
+    Lease *lease = db_lease_find_by_id(db, lease_id);
+    if (!lease) return 0;
+    
+    if (lease->auto_renew == 0) {
+        free(lease);
+        return 0;
+    }
+    
+    if (lease->status != LEASE_STATUS_ACTIVE && lease->status != LEASE_STATUS_EXPIRED) {
+        free(lease);
+        return 0;
+    }
+    
+    // Calculate new dates (extend by same duration)
+    // For simplicity, extend by 1 year
+    int start_year, start_month, start_day;
+    int end_year, end_month, end_day;
+    sscanf(lease->start_date, "%d-%d-%d", &start_year, &start_month, &start_day);
+    sscanf(lease->end_date, "%d-%d-%d", &end_year, &end_month, &end_day);
+    
+    int duration_days = (end_year - start_year) * 365 + (end_month - start_month) * 30 + (end_day - start_day);
+    if (duration_days <= 0) duration_days = 365;
+    
+    int new_start_year = end_year, new_start_month = end_month, new_start_day = end_day + 1;
+    int new_end_year = end_year, new_end_month = end_month, new_end_day = end_day;
+    
+    // Add duration
+    int days_added = 0;
+    while (days_added < duration_days) {
+        new_end_day++;
+        days_added++;
+        if (new_end_day > 28) { // Simplified month handling
+            new_end_day = 1;
+            new_end_month++;
+            if (new_end_month > 12) {
+                new_end_month = 1;
+                new_end_year++;
+            }
+        }
+    }
+    
+    char new_start[MAX_FIELD_LEN], new_end[MAX_FIELD_LEN];
+    snprintf(new_start, sizeof(new_start), "%04d-%02d-%02d", new_start_year, new_start_month, new_start_day);
+    snprintf(new_end, sizeof(new_end), "%04d-%02d-%02d", new_end_year, new_end_month, new_end_day);
+    
+    // Create new lease
+    Lease new_lease;
+    memset(&new_lease, 0, sizeof(Lease));
+    strcpy(new_lease.property_code, lease->property_code);
+    strcpy(new_lease.tenant_username, lease->tenant_username);
+    strcpy(new_lease.start_date, new_start);
+    strcpy(new_lease.end_date, new_end);
+    new_lease.monthly_rent = lease->monthly_rent;
+    new_lease.deposit = lease->deposit;
+    new_lease.payment_day = lease->payment_day;
+    new_lease.status = LEASE_STATUS_ACTIVE;
+    new_lease.auto_renew = lease->auto_renew;
+    
+    int result = db_lease_create(db, &new_lease);
+    
+    // Mark old lease as expired
+    lease->status = LEASE_STATUS_EXPIRED;
+    db_lease_update(db, lease);
+    
+    free(lease);
+    return result;
+}
+
+int db_lease_process_renewals(Database *db, int days_ahead) {
+    if (!db) return 0;
+    
+    Lease *leases = NULL;
+    int count = 0;
+    if (!db_lease_list_expiring(db, days_ahead, &leases, &count)) return 0;
+    
+    int renewed = 0;
+    for (int i = 0; i < count; i++) {
+        if (leases[i].auto_renew) {
+            if (db_lease_auto_renew(db, leases[i].id)) {
+                renewed++;
+            }
+        }
+    }
+    
+    if (leases) free(leases);
+    return renewed;
 }
 
 int db_property_create(Database *db, const Property *prop) {

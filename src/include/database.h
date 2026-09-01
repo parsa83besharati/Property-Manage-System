@@ -53,4 +53,37 @@ int db_lease_count(Database *db);
 int db_lease_count_by_tenant(Database *db, const char *username);
 int db_lease_count_by_property(Database *db, const char *property_code);
 
+// Payment operations
+typedef struct {
+    int id;
+    int lease_id;
+    double amount;
+    char payment_date[MAX_FIELD_LEN];
+    char due_date[MAX_FIELD_LEN];
+    int is_late;
+    double late_fee;
+    char notes[MAX_STRING_LEN];
+    char recorded_by[MAX_FIELD_LEN];
+    char created_at[MAX_FIELD_LEN];
+} Payment;
+
+typedef struct {
+    Payment *payments;
+    int count;
+    int capacity;
+} PaymentList;
+
+int db_payment_create(Database *db, const Payment *payment);
+Payment *db_payment_find_by_id(Database *db, int id);
+int db_payment_list_by_lease(Database *db, int lease_id, Payment **payments, int *count);
+int db_payment_list_by_date_range(Database *db, const char *start_date, const char *end_date, Payment **payments, int *count);
+int db_payment_list_late(Database *db, Payment **payments, int *count);
+double db_payment_sum_by_lease(Database *db, int lease_id);
+int db_payment_count(Database *db);
+
+// Renewal operations
+int db_lease_check_expiring(Database *db, int days_ahead, Lease **leases, int *count);
+int db_lease_auto_renew(Database *db, int lease_id);
+int db_lease_process_renewals(Database *db, int days_ahead);
+
 #endif

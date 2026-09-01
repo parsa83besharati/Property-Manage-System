@@ -167,6 +167,12 @@ typedef struct {
     int capacity;
 } LeaseList;
 
+typedef struct {
+    Payment *payments;
+    int count;
+    int capacity;
+} PaymentList;
+
 void safe_gets(char *buffer, int size);
 void trim_newline(char *str);
 void str_to_lower(char *str);
