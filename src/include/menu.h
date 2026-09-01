@@ -19,4 +19,13 @@ void menu_view_leases(Database *db, const char *username);
 void menu_lease_payments(Database *db, const char *username);
 void menu_terminate_lease(Database *db, const char *username);
 
+// Expense management
+void menu_expense_management(Database *db, const char *username);
+void menu_add_expense(Database *db, const char *username);
+void menu_view_expenses(Database *db, const char *username);
+void menu_expense_summary(Database *db, const char *username);
+
+// Reports
+void menu_reports(Database *db, const char *username);
+
 #endif

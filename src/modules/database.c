@@ -90,7 +90,21 @@ static const char *SCHEMA_SQL =
     "CREATE INDEX IF NOT EXISTS idx_leases_tenant ON leases(tenant_username);"
     "CREATE INDEX IF NOT EXISTS idx_leases_property ON leases(property_code);"
     "CREATE INDEX IF NOT EXISTS idx_leases_status ON leases(status);"
-    "CREATE INDEX IF NOT EXISTS idx_leases_dates ON leases(start_date, end_date);";
+    "CREATE INDEX IF NOT EXISTS idx_leases_dates ON leases(start_date, end_date);"
+    "CREATE TABLE IF NOT EXISTS expenses ("
+    "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "    property_code TEXT NOT NULL,"
+    "    type INTEGER NOT NULL,"
+    "    amount REAL NOT NULL,"
+    "    date TEXT NOT NULL,"
+    "    description TEXT DEFAULT '',"
+    "    vendor TEXT DEFAULT '',"
+    "    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+    "    FOREIGN KEY (property_code) REFERENCES properties(code)"
+    ");"
+    "CREATE INDEX IF NOT EXISTS idx_expenses_property ON expenses(property_code);"
+    "CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);"
+    "CREATE INDEX IF NOT EXISTS idx_expenses_type ON expenses(type);";
 
 Database *database_open(const char *path) {
     Database *db = malloc(sizeof(Database));
@@ -809,6 +823,309 @@ int db_payment_count(Database *db) {
     sqlite3_stmt *stmt;
     int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) return 0;
+    
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+// ============================================================================
+// EXPENSE OPERATIONS
+// ============================================================================
+
+static void row_to_expense(sqlite3_stmt *stmt, Expense *expense) {
+    expense->id = sqlite3_column_int(stmt, 0);
+    strncpy(expense->property_code, (const char*)sqlite3_column_text(stmt, 1), MAX_FIELD_LEN - 1);
+    expense->type = (ExpenseType)sqlite3_column_int(stmt, 2);
+    expense->amount = sqlite3_column_double(stmt, 3);
+    strncpy(expense->date, (const char*)sqlite3_column_text(stmt, 4), MAX_FIELD_LEN - 1);
+    strncpy(expense->description, (const char*)sqlite3_column_text(stmt, 5), MAX_STRING_LEN - 1);
+    strncpy(expense->vendor, (const char*)sqlite3_column_text(stmt, 6), MAX_FIELD_LEN - 1);
+    strncpy(expense->created_at, (const char*)sqlite3_column_text(stmt, 7), MAX_FIELD_LEN - 1);
+}
+
+static int bind_expense_stmt(sqlite3_stmt *stmt, const Expense *expense) {
+    sqlite3_bind_text(stmt, 1, expense->property_code, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, (int)expense->type);
+    sqlite3_bind_double(stmt, 3, expense->amount);
+    sqlite3_bind_text(stmt, 4, expense->date, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 5, expense->description, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 6, expense->vendor, -1, SQLITE_STATIC);
+    return SQLITE_OK;
+}
+
+int db_expense_create(Database *db, const Expense *expense) {
+    if (!db || !expense) return 0;
+    const char *sql = "INSERT INTO expenses (property_code, type, amount, date, description, vendor) "
+                      "VALUES (?, ?, ?, ?, ?, ?)";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    bind_expense_stmt(stmt, expense);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE;
+}
+
+Expense *db_expense_find_by_id(Database *db, int id) {
+    if (!db) return NULL;
+    const char *sql = "SELECT id, property_code, type, amount, date, description, vendor, created_at "
+                      "FROM expenses WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return NULL;
+    
+    sqlite3_bind_int(stmt, 1, id);
+    
+    Expense *expense = NULL;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        expense = malloc(sizeof(Expense));
+        row_to_expense(stmt, expense);
+    }
+    sqlite3_finalize(stmt);
+    return expense;
+}
+
+int db_expense_update(Database *db, const Expense *expense) {
+    if (!db || !expense) return 0;
+    const char *sql = "UPDATE expenses SET property_code = ?, type = ?, amount = ?, date = ?, "
+                      "description = ?, vendor = ? WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    bind_expense_stmt(stmt, expense);
+    sqlite3_bind_int(stmt, 7, expense->id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
+}
+
+int db_expense_delete(Database *db, int id) {
+    if (!db) return 0;
+    const char *sql = "DELETE FROM expenses WHERE id = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, id);
+    
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE && sqlite3_changes(db->db) > 0;
+}
+
+int db_expense_list_all(Database *db, Expense **expenses, int *count) {
+    if (!db || !expenses || !count) return 0;
+    const char *sql = "SELECT id, property_code, type, amount, date, description, vendor, created_at "
+                      "FROM expenses ORDER BY date DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int capacity = 100;
+    *expenses = malloc(capacity * sizeof(Expense));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *expenses = realloc(*expenses, capacity * sizeof(Expense));
+        }
+        row_to_expense(stmt, &(*expenses)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_expense_list_by_property(Database *db, const char *property_code, Expense **expenses, int *count) {
+    if (!db || !property_code || !expenses || !count) return 0;
+    const char *sql = "SELECT id, property_code, type, amount, date, description, vendor, created_at "
+                      "FROM expenses WHERE property_code = ? ORDER BY date DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, property_code, -1, SQLITE_STATIC);
+    
+    int capacity = 100;
+    *expenses = malloc(capacity * sizeof(Expense));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *expenses = realloc(*expenses, capacity * sizeof(Expense));
+        }
+        row_to_expense(stmt, &(*expenses)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_expense_list_by_type(Database *db, ExpenseType type, Expense **expenses, int *count) {
+    if (!db || !expenses || !count) return 0;
+    const char *sql = "SELECT id, property_code, type, amount, date, description, vendor, created_at "
+                      "FROM expenses WHERE type = ? ORDER BY date DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_int(stmt, 1, (int)type);
+    
+    int capacity = 100;
+    *expenses = malloc(capacity * sizeof(Expense));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *expenses = realloc(*expenses, capacity * sizeof(Expense));
+        }
+        row_to_expense(stmt, &(*expenses)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_expense_list_by_date_range(Database *db, const char *start_date, const char *end_date, Expense **expenses, int *count) {
+    if (!db || !start_date || !end_date || !expenses || !count) return 0;
+    const char *sql = "SELECT id, property_code, type, amount, date, description, vendor, created_at "
+                      "FROM expenses WHERE date BETWEEN ? AND ? ORDER BY date DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, start_date, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, end_date, -1, SQLITE_STATIC);
+    
+    int capacity = 100;
+    *expenses = malloc(capacity * sizeof(Expense));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *expenses = realloc(*expenses, capacity * sizeof(Expense));
+        }
+        row_to_expense(stmt, &(*expenses)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+int db_expense_list_by_property_date_range(Database *db, const char *property_code, const char *start_date, const char *end_date, Expense **expenses, int *count) {
+    if (!db || !property_code || !start_date || !end_date || !expenses || !count) return 0;
+    const char *sql = "SELECT id, property_code, type, amount, date, description, vendor, created_at "
+                      "FROM expenses WHERE property_code = ? AND date BETWEEN ? AND ? ORDER BY date DESC";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, property_code, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, start_date, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, end_date, -1, SQLITE_STATIC);
+    
+    int capacity = 100;
+    *expenses = malloc(capacity * sizeof(Expense));
+    *count = 0;
+    
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (*count >= capacity) {
+            capacity *= 2;
+            *expenses = realloc(*expenses, capacity * sizeof(Expense));
+        }
+        row_to_expense(stmt, &(*expenses)[(*count)++]);
+    }
+    
+    sqlite3_finalize(stmt);
+    return 1;
+}
+
+double db_expense_sum_by_property(Database *db, const char *property_code) {
+    if (!db || !property_code) return 0.0;
+    const char *sql = "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE property_code = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0.0;
+    
+    sqlite3_bind_text(stmt, 1, property_code, -1, SQLITE_STATIC);
+    
+    double sum = 0.0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        sum = sqlite3_column_double(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return sum;
+}
+
+double db_expense_sum_by_type(Database *db, ExpenseType type) {
+    if (!db) return 0.0;
+    const char *sql = "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE type = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0.0;
+    
+    sqlite3_bind_int(stmt, 1, (int)type);
+    
+    double sum = 0.0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        sum = sqlite3_column_double(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return sum;
+}
+
+double db_expense_sum_by_property_type(Database *db, const char *property_code, ExpenseType type) {
+    if (!db || !property_code) return 0.0;
+    const char *sql = "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE property_code = ? AND type = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0.0;
+    
+    sqlite3_bind_text(stmt, 1, property_code, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, (int)type);
+    
+    double sum = 0.0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        sum = sqlite3_column_double(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return sum;
+}
+
+int db_expense_count(Database *db) {
+    if (!db) return 0;
+    const char *sql = "SELECT COUNT(*) FROM expenses";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+int db_expense_count_by_property(Database *db, const char *property_code) {
+    if (!db || !property_code) return 0;
+    const char *sql = "SELECT COUNT(*) FROM expenses WHERE property_code = ?";
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) return 0;
+    
+    sqlite3_bind_text(stmt, 1, property_code, -1, SQLITE_STATIC);
     
     int count = 0;
     if (sqlite3_step(stmt) == SQLITE_ROW) {

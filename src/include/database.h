@@ -67,4 +67,20 @@ int db_lease_check_expiring(Database *db, int days_ahead, Lease **leases, int *c
 int db_lease_auto_renew(Database *db, int lease_id);
 int db_lease_process_renewals(Database *db, int days_ahead);
 
+// Expense operations
+int db_expense_create(Database *db, const Expense *expense);
+Expense *db_expense_find_by_id(Database *db, int id);
+int db_expense_update(Database *db, const Expense *expense);
+int db_expense_delete(Database *db, int id);
+int db_expense_list_all(Database *db, Expense **expenses, int *count);
+int db_expense_list_by_property(Database *db, const char *property_code, Expense **expenses, int *count);
+int db_expense_list_by_type(Database *db, ExpenseType type, Expense **expenses, int *count);
+int db_expense_list_by_date_range(Database *db, const char *start_date, const char *end_date, Expense **expenses, int *count);
+int db_expense_list_by_property_date_range(Database *db, const char *property_code, const char *start_date, const char *end_date, Expense **expenses, int *count);
+double db_expense_sum_by_property(Database *db, const char *property_code);
+double db_expense_sum_by_type(Database *db, ExpenseType type);
+double db_expense_sum_by_property_type(Database *db, const char *property_code, ExpenseType type);
+int db_expense_count(Database *db);
+int db_expense_count_by_property(Database *db, const char *property_code);
+
 #endif

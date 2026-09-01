@@ -186,6 +186,33 @@ typedef struct {
     int capacity;
 } PaymentList;
 
+typedef enum {
+    EXPENSE_TYPE_MORTGAGE,
+    EXPENSE_TYPE_INSURANCE,
+    EXPENSE_TYPE_UTILITIES,
+    EXPENSE_TYPE_HOA,
+    EXPENSE_TYPE_MAINTENANCE,
+    EXPENSE_TYPE_TAX,
+    EXPENSE_TYPE_OTHER
+} ExpenseType;
+
+typedef struct {
+    int id;
+    char property_code[MAX_FIELD_LEN];
+    ExpenseType type;
+    double amount;
+    char date[MAX_FIELD_LEN];
+    char description[MAX_STRING_LEN];
+    char vendor[MAX_FIELD_LEN];
+    char created_at[MAX_FIELD_LEN];
+} Expense;
+
+typedef struct {
+    Expense *expenses;
+    int count;
+    int capacity;
+} ExpenseList;
+
 void safe_gets(char *buffer, int size);
 void trim_newline(char *str);
 void str_to_lower(char *str);

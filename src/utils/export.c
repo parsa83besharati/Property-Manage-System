@@ -180,12 +180,53 @@ int export_payments_to_csv(Database *db, const char *filename) {
     return 1;
 }
 
-int export_all_to_csv(Database *db, const char *users_file, const char *properties_file, const char *leases_file, const char *payments_file) {
-    if (!db || !users_file || !properties_file || !leases_file || !payments_file) return 0;
+int export_all_to_csv(Database *db, const char *users_file, const char *properties_file, const char *leases_file, const char *payments_file, const char *expenses_file) {
+    if (!db || !users_file || !properties_file || !leases_file || !payments_file || !expenses_file) return 0;
     if (!export_users_to_csv(db, users_file)) return 0;
     if (!export_properties_to_csv(db, properties_file)) return 0;
     if (!export_leases_to_csv(db, leases_file)) return 0;
     if (!export_payments_to_csv(db, payments_file)) return 0;
+    if (!export_expenses_to_csv(db, expenses_file)) return 0;
+    return 1;
+}
+
+// =============================================================================
+// EXPENSE EXPORT FUNCTIONS
+// =============================================================================
+
+int export_expenses_to_csv(Database *db, const char *filename) {
+    if (!db || !filename) return 0;
+    
+    Expense *expenses = NULL;
+    int count = 0;
+    if (!db_expense_list_all(db, &expenses, &count)) return 0;
+    
+    FILE *fp = fopen(filename, "w");
+    if (!fp) return 0;
+    
+    fprintf(fp, "id,property_code,type,amount,date,description,vendor,created_at\n");
+    
+    for (int i = 0; i < count; i++) {
+        Expense *e = &expenses[i];
+        
+        const char *type_name = "Unknown";
+        switch (e->type) {
+            case 0: type_name = "Mortgage"; break;
+            case 1: type_name = "Insurance"; break;
+            case 2: type_name = "Utilities"; break;
+            case 3: type_name = "HOA"; break;
+            case 4: type_name = "Maintenance"; break;
+            case 5: type_name = "Tax"; break;
+            case 6: type_name = "Other"; break;
+        }
+        
+        fprintf(fp, "%d,%s,%s,%.2f,%s,%s,%s,%s\n",
+                e->id, e->property_code, type_name, e->amount,
+                e->date, e->description, e->vendor, e->created_at);
+    }
+    
+    fclose(fp);
+    free(expenses);
     return 1;
 }
 

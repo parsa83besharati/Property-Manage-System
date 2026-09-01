@@ -60,6 +60,8 @@ void menu_main(Database *db, const char *username) {
         "Remove your property listing",
         "Search and view properties",
         "Manage your leases",
+        "Manage expenses",
+        "View reports",
         "Manage your profile",
         "Sign out"
     };
@@ -72,25 +74,29 @@ void menu_main(Database *db, const char *username) {
         ui_status_bar(username, "USER", time_str);
         
         ui_menu_start("MAIN MENU");
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 8; i++) {
             ui_menu_item(i + 1, 
                 i == 0 ? "Add Property" : 
                 i == 1 ? "Delete Property" :
                 i == 2 ? "Search Properties" :
                 i == 3 ? "Lease Management" :
-                i == 4 ? "Settings" : "Logout",
+                i == 4 ? "Expense Mgmt" :
+                i == 5 ? "Reports" :
+                i == 6 ? "Settings" : "Logout",
                 main_options[i], false);
         }
         
-        int choice = ui_menu_end("Select option", 1, 6);
+        int choice = ui_menu_end("Select option", 1, 8);
         
         switch (choice) {
             case 1: menu_add_property(db, username); break;
             case 2: menu_delete_property(db, username); break;
             case 3: menu_search_properties(db, username); break;
             case 4: menu_lease_management(db, username); break;
-            case 5: menu_user_settings(db, username); break;
-            case 6: return;
+            case 5: menu_expense_management(db, username); break;
+            case 6: menu_reports(db, username); break;
+            case 7: menu_user_settings(db, username); break;
+            case 8: return;
             default: ui_toast(UI_STYLE_ERROR, "Invalid option"); Sleep(1000);
         }
     }
@@ -915,4 +921,375 @@ void menu_terminate_lease(Database *db, const char *username) {
     if (leases) free(leases);
     ui_footer("Press any key to continue", "");
     _getch();
+}
+
+// =============================================================================
+// EXPENSE MANAGEMENT MENU
+// =============================================================================
+
+void menu_expense_management(Database *db, const char *username) {
+    const char *expense_options[] = {
+        "Add new expense",
+        "View expenses for your properties",
+        "View expense summary by type"
+    };
+    
+    while (1) {
+        char time_str[20];
+        get_current_time(time_str, sizeof(time_str));
+        ui_clear();
+        ui_header("EXPENSE MANAGEMENT", "Track Property Expenses");
+        ui_status_bar(username, "EXPENSES", time_str);
+        
+        ui_menu_start("EXPENSE MENU");
+        for (int i = 0; i < 3; i++) {
+            ui_menu_item(i + 1, 
+                i == 0 ? "Add Expense" :
+                i == 1 ? "View Expenses" : "Summary by Type",
+                expense_options[i], false);
+        }
+        ui_print_styled(UI_STYLE_MUTED, "  0. Back to Main Menu\n");
+        
+        int choice = ui_menu_end("Select option", 0, 3);
+        
+        if (choice == 0) break;
+        
+        switch (choice) {
+            case 1: menu_add_expense(db, username); break;
+            case 2: menu_view_expenses(db, username); break;
+            case 3: menu_expense_summary(db, username); break;
+            default: ui_toast(UI_STYLE_ERROR, "Invalid option"); Sleep(1000);
+        }
+    }
+}
+
+void menu_add_expense(Database *db, const char *username) {
+    ui_clear();
+    ui_header("ADD EXPENSE", "Record Property Expense");
+    
+    // List properties owned by user
+    Property *props = NULL;
+    int count = 0;
+    char where[128];
+    snprintf(where, sizeof(where), "username = '%s' AND active = 1", username);
+    if (!db_property_list_paginated(db, where, "date DESC", 0, 0, &props, &count)) {
+        ui_alert(UI_STYLE_ERROR, "Error", "Failed to load properties");
+        return;
+    }
+    
+    if (count == 0) {
+        ui_alert(UI_STYLE_WARNING, "No Properties", "You have no active properties. Add a property first.");
+        if (props) free(props);
+        ui_footer("Press any key to continue", "");
+        _getch();
+        return;
+    }
+    
+    ui_print_styled(UI_STYLE_PRIMARY, "  Your Properties:\n\n");
+    for (int i = 0; i < count; i++) {
+        ui_print_styled(UI_STYLE_INFO, "  %d. %s - %s, District %d\n",
+            i + 1, props[i].code, props[i].address, props[i].district);
+    }
+    free(props);
+    
+    // Select property
+    char prop_code[MAX_FIELD_LEN];
+    ui_form_start("SELECT PROPERTY");
+    if (!ui_form_field("Property Code", prop_code, MAX_FIELD_LEN, NULL, "Enter the code of the property")) {
+        return;
+    }
+    ui_form_end();
+    
+    Property *prop = db_property_find_by_code(db, prop_code);
+    if (!prop || strcmp(prop->username, username) != 0) {
+        ui_alert(UI_STYLE_ERROR, "Invalid", "Property not found or not your property.");
+        if (prop) free(prop);
+        ui_footer("Press any key to continue", "");
+        _getch();
+        return;
+    }
+    free(prop);
+    
+    // Expense type
+    const char *type_options[] = {
+        "Mortgage", "Insurance", "Utilities", "HOA",
+        "Maintenance", "Tax", "Other"
+    };
+    int type_idx;
+    ui_form_start("EXPENSE TYPE");
+    if (!ui_form_field_enum("Expense Type", type_options, 7, &type_idx, "Select expense category")) {
+        return;
+    }
+    ui_form_end();
+    
+    // Amount
+    double amount;
+    ui_form_start("AMOUNT");
+    if (!ui_form_field_double("Amount", &amount, 0, 10000000, "Expense amount")) return;
+    ui_form_end();
+    
+    // Date
+    char date[MAX_FIELD_LEN];
+    ui_form_start("DATE (YYYY-MM-DD)");
+    if (!ui_form_field("Date", date, MAX_FIELD_LEN, NULL, "e.g., 2026-01-15")) return;
+    ui_form_end();
+    
+    // Description
+    char description[MAX_STRING_LEN];
+    ui_form_start("DESCRIPTION (Optional)");
+    ui_form_field("Description", description, MAX_STRING_LEN, NULL, "e.g., Monthly mortgage payment");
+    ui_form_end();
+    
+    // Vendor
+    char vendor[MAX_FIELD_LEN];
+    ui_form_start("VENDOR (Optional)");
+    ui_form_field("Vendor", vendor, MAX_FIELD_LEN, NULL, "e.g., Bank name, utility company");
+    ui_form_end();
+    
+    // Create expense
+    Expense expense;
+    memset(&expense, 0, sizeof(Expense));
+    strcpy(expense.property_code, prop_code);
+    expense.type = (ExpenseType)type_idx;
+    expense.amount = amount;
+    strcpy(expense.date, date);
+    strcpy(expense.description, description);
+    strcpy(expense.vendor, vendor);
+    
+    ui_spinner_start("Adding expense...");
+    Sleep(500);
+    int result = db_expense_create(db, &expense);
+    ui_spinner_stop();
+    
+    if (result) {
+        ui_alert(UI_STYLE_SUCCESS, "Success", "Expense recorded successfully!");
+        ui_print_styled(UI_STYLE_INFO, "  Property: %s\n", prop_code);
+        ui_print_styled(UI_STYLE_INFO, "  Type: %s\n", 
+            type_idx == 0 ? "Mortgage" : type_idx == 1 ? "Insurance" : 
+            type_idx == 2 ? "Utilities" : type_idx == 3 ? "HOA" : 
+            type_idx == 4 ? "Maintenance" : type_idx == 5 ? "Tax" : "Other");
+        ui_print_styled(UI_STYLE_INFO, "  Amount: %.2f\n", amount);
+        ui_print_styled(UI_STYLE_INFO, "  Date: %s\n", date);
+    } else {
+        ui_alert(UI_STYLE_ERROR, "Error", "Failed to record expense.");
+    }
+    ui_footer("Press any key to continue", "");
+    _getch();
+}
+
+void menu_view_expenses(Database *db, const char *username) {
+    ui_clear();
+    ui_header("MY EXPENSES", "All Property Expenses");
+    
+    // Get user's properties first
+    Property *props = NULL;
+    int prop_count = 0;
+    char where[128];
+    snprintf(where, sizeof(where), "username = '%s' AND active = 1", username);
+    if (!db_property_list_paginated(db, where, "date DESC", 0, 0, &props, &prop_count)) {
+        ui_alert(UI_STYLE_ERROR, "Error", "Failed to load properties");
+        return;
+    }
+    
+    if (prop_count == 0) {
+        ui_alert(UI_STYLE_WARNING, "No Properties", "You have no active properties.");
+        if (props) free(props);
+        ui_footer("Press any key to continue", "");
+        _getch();
+        return;
+    }
+    
+    // Collect all expenses for user's properties
+    Expense *all_expenses = NULL;
+    int total_count = 0;
+    int capacity = 100;
+    all_expenses = malloc(capacity * sizeof(Expense));
+    
+    for (int i = 0; i < prop_count; i++) {
+        Expense *expenses = NULL;
+        int count = 0;
+        if (db_expense_list_by_property(db, props[i].code, &expenses, &count)) {
+            for (int j = 0; j < count; j++) {
+                if (total_count >= capacity) {
+                    capacity *= 2;
+                    all_expenses = realloc(all_expenses, capacity * sizeof(Expense));
+                }
+                all_expenses[total_count++] = expenses[j];
+            }
+            free(expenses);
+        }
+    }
+    
+    if (props) free(props);
+    
+    if (total_count == 0) {
+        ui_print_styled(UI_STYLE_MUTED, "  No expenses recorded yet.\n");
+    } else {
+        // Sort by date (newest first)
+        for (int i = 0; i < total_count - 1; i++) {
+            for (int j = i + 1; j < total_count; j++) {
+                if (strcmp(all_expenses[i].date, all_expenses[j].date) < 0) {
+                    Expense temp = all_expenses[i];
+                    all_expenses[i] = all_expenses[j];
+                    all_expenses[j] = temp;
+                }
+            }
+        }
+        
+        const char *type_str[] = {"Mortgage", "Insurance", "Utilities", "HOA", "Maintenance", "Tax", "Other"};
+        
+        ui_print_styled(UI_STYLE_PRIMARY, "  %-5s %-12s %-12s %10s %-12s %-20s\n",
+            "ID", "Property", "Type", "Amount", "Date");
+        ui_divider();
+        
+        double total = 0.0;
+        for (int i = 0; i < total_count; i++) {
+            Expense *e = &all_expenses[i];
+            ui_print_styled(UI_STYLE_DEFAULT, "  %-5d %-12s %-12s %10.2f %-12s\n",
+                e->id, e->property_code, 
+                (e->type >= 0 && e->type <= 6) ? 
+                    (e->type == 0 ? "Mortgage" : e->type == 1 ? "Insurance" : 
+                     e->type == 2 ? "Utilities" : e->type == 3 ? "HOA" : 
+                     e->type == 4 ? "Maintenance" : e->type == 5 ? "Tax" : "Other") : "Unknown",
+                e->amount, e->date);
+            total += e->amount;
+        }
+        ui_divider();
+        ui_print_styled(UI_STYLE_PRIMARY, "  Total Expenses: %.2f (%d records)\n", total, total_count);
+    }
+    
+    if (all_expenses) free(all_expenses);
+    ui_footer("Press any key to continue", "");
+    _getch();
+}
+
+void menu_expense_summary(Database *db, const char *username) {
+    ui_clear();
+    ui_header("EXPENSE SUMMARY", "Expenses by Type");
+    
+    // Get user's properties
+    Property *props = NULL;
+    int prop_count = 0;
+    char where[128];
+    snprintf(where, sizeof(where), "username = '%s' AND active = 1", username);
+    if (!db_property_list_paginated(db, where, "date DESC", 0, 0, &props, &prop_count)) {
+        ui_alert(UI_STYLE_ERROR, "Error", "Failed to load properties");
+        return;
+    }
+    
+    double type_totals[7] = {0};
+    double grand_total = 0.0;
+    
+    for (int i = 0; i < prop_count; i++) {
+        for (int t = 0; t < 7; t++) {
+            double sum = db_expense_sum_by_property_type(db, props[i].code, (ExpenseType)t);
+            type_totals[t] += sum;
+            grand_total += sum;
+        }
+    }
+    
+    if (props) free(props);
+    
+    const char *type_str[] = {"Mortgage", "Insurance", "Utilities", "HOA", "Maintenance", "Tax", "Other"};
+    
+    ui_print_styled(UI_STYLE_PRIMARY, "  %-15s %12s\n", "Type", "Amount");
+    ui_divider();
+    
+    for (int t = 0; t < 7; t++) {
+        if (type_totals[t] > 0) {
+            ui_print_styled(UI_STYLE_INFO, "  %-15s %12.2f\n", 
+                (t == 0 ? "Mortgage" : t == 1 ? "Insurance" : t == 2 ? "Utilities" : 
+                 t == 3 ? "HOA" : t == 4 ? "Maintenance" : t == 5 ? "Tax" : "Other"),
+                type_totals[t]);
+        }
+    }
+    ui_divider();
+    ui_print_styled(UI_STYLE_PRIMARY, "  %-15s %12.2f\n", "TOTAL", grand_total);
+    
+    if (props) free(props);
+    ui_footer("Press any key to continue", "");
+    _getch();
+}
+
+// =============================================================================
+// REPORTS MENU
+// =============================================================================
+
+void menu_reports(Database *db, const char *username) {
+    const char *report_options[] = {
+        "Generate Rent Roll Report",
+        "Generate Expense Report",
+        "Generate Property Summary Report"
+    };
+    
+    while (1) {
+        char time_str[20];
+        get_current_time(time_str, sizeof(time_str));
+        ui_clear();
+        ui_header("REPORTS", "Generate Management Reports");
+        ui_status_bar(username, "REPORTS", time_str);
+        
+        ui_menu_start("REPORTS MENU");
+        for (int i = 0; i < 3; i++) {
+            ui_menu_item(i + 1, 
+                i == 0 ? "Rent Roll" :
+                i == 1 ? "Expense Report" : "Property Summary",
+                report_options[i], false);
+        }
+        ui_print_styled(UI_STYLE_MUTED, "  0. Back to Main Menu\n");
+        
+        int choice = ui_menu_end("Select report", 0, 3);
+        
+        if (choice == 0) break;
+        
+        char filename[256];
+        time_t now = time(NULL);
+        struct tm *tm_info = localtime(&now);
+        char date_suffix[32];
+        strftime(date_suffix, sizeof(date_suffix), "%Y%m%d_%H%M%S", tm_info);
+        
+        switch (choice) {
+            case 1:
+                snprintf(filename, sizeof(filename), "rent_roll_%s.csv", date_suffix);
+                ui_spinner_start("Generating rent roll report...");
+                Sleep(500);
+                if (generate_rent_roll_report(db, filename)) {
+                    ui_alert(UI_STYLE_SUCCESS, "Success", "Rent roll report generated!");
+                    ui_print_styled(UI_STYLE_INFO, "  Saved as: %s\n", filename);
+                } else {
+                    ui_alert(UI_STYLE_ERROR, "Error", "Failed to generate report.");
+                }
+                ui_spinner_stop();
+                break;
+            case 2:
+                snprintf(filename, sizeof(filename), "expense_report_%s.txt", date_suffix);
+                ui_spinner_start("Generating expense report...");
+                Sleep(500);
+                if (generate_expense_report(db, filename)) {
+                    ui_alert(UI_STYLE_SUCCESS, "Success", "Expense report generated!");
+                    ui_print_styled(UI_STYLE_INFO, "  Saved as: %s\n", filename);
+                } else {
+                    ui_alert(UI_STYLE_ERROR, "Error", "Failed to generate report.");
+                }
+                ui_spinner_stop();
+                break;
+            case 3:
+                snprintf(filename, sizeof(filename), "property_summary_%s.txt", date_suffix);
+                ui_spinner_start("Generating property summary...");
+                Sleep(500);
+                if (generate_property_summary_report(db, filename)) {
+                    ui_alert(UI_STYLE_SUCCESS, "Success", "Property summary report generated!");
+                    ui_print_styled(UI_STYLE_INFO, "  Saved as: %s\n", filename);
+                } else {
+                    ui_alert(UI_STYLE_ERROR, "Error", "Failed to generate report.");
+                }
+                ui_spinner_stop();
+                break;
+            default:
+                ui_toast(UI_STYLE_ERROR, "Invalid option");
+                Sleep(1000);
+        }
+        ui_footer("Press any key to continue", "");
+        _getch();
+    }
 }

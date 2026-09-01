@@ -16,6 +16,7 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/utils/config.c \
           $(SRC_DIR)/utils/export.c \
           $(SRC_DIR)/utils/audit.c \
+          $(SRC_DIR)/utils/reports.c \
           $(SRC_DIR)/modules/user.c \
           $(SRC_DIR)/modules/property.c \
           $(SRC_DIR)/modules/menu.c \
